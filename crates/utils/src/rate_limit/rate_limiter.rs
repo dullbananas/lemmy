@@ -74,9 +74,11 @@ impl RateLimitStorage {
 
     let now = InstantSecs::now();
     let bucket = {
-      let default = RateLimitBucket {
-        last_checked: now,
-        tokens: capacity,
+      let default = enum_map! {
+        _ => RateLimitBucket {
+          last_checked: now,
+          tokens: capacity,
+        },
       };
       let ip_buckets = self.buckets.entry(*ip).or_insert(default);
       #[allow(clippy::indexing_slicing)] // `EnumMap` has no `get` funciton
@@ -85,7 +87,7 @@ impl RateLimitStorage {
 
     let secs_since_last_checked = now.secs_since(bucket.last_checked) as f32;
     bucket.last_checked = now;
-    
+
     // For `secs_since_last_checked` seconds, increase `bucket.tokens`
     // by `capacity` every `secs_to_refill` seconds
     bucket.tokens += {
