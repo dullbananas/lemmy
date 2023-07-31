@@ -234,20 +234,8 @@ impl JoinView for CommentReportView {
     Option<PersonWithoutId>,
   );
 
-  fn from_tuple(a: Self::JoinTuple) -> Self {
-    let comment_report = a.0;
-    let counts = a.6.into_full(&a.1);
-    let comment = a.1.into_full(comment_report.comment_id);
-    let post = a.2.into_full(comment.post_id);
-    let community = a.3.into_full(post.community_id);
-    let creator = a.4.into_full(comment_report.creator_id);
-    let comment_creator = a.5.into_full(comment.creator_id);
-    let resolver = if let (Some(resolver), Some(resolver_id)) = (a.9, comment_report.resolver_id) {
-      Some(resolver.into_full(resolver_id))
-    } else {
-      None
-    };
-    Self {
+  fn from_tuple(
+    (
       comment_report,
       comment,
       post,
@@ -255,9 +243,22 @@ impl JoinView for CommentReportView {
       creator,
       comment_creator,
       counts,
-      creator_banned_from_community: a.7,
-      my_vote: a.8,
+      creator_banned_from_community,
+      my_vote,
       resolver,
+    ): Self::JoinTuple,
+  ) -> Self {
+    Self {
+      resolver: resolver.zip(comment_report.resolver_id).map(|(resolver, id)| resolver.into_full(id)),
+      my_vote,
+      creator_banned_from_community,
+      counts: counts.into_full(&comment),
+      comment_creator: comment_creator.into_full(comment.creator_id),
+      creator: creator.into_full(comment_report.creator_id),
+      community: community.into_full(post.community_id),
+      post: post.into_full(comment.post_id),
+      comment: comment.into_full(comment_report.comment_id),
+      comment_report,
     }
   }
 }
