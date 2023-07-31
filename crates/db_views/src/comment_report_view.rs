@@ -29,9 +29,9 @@ use lemmy_db_schema::{
   source::{
     comment::CommentWithoutId,
     comment_report::CommentReport,
-    community::Community,
-    person::Person,
-    post::Post,
+    community::CommunityWithoutId,
+    person::PersonWithoutId,
+    post::PostWithoutId,
   },
   traits::JoinView,
   utils::{get_conn, limit_and_offset, DbConn, DbPool, ListFn, Queries, ReadFn},
