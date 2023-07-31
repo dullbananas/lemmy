@@ -20,6 +20,12 @@ extern crate diesel_migrations;
 #[macro_use]
 extern crate async_trait;
 
+#[macro_use]
+extern crate macro_rules_attribute;
+
+#[cfg(feature = "full)]
+#[macro_use]
+mod without_id;
 pub mod aggregates;
 #[cfg(feature = "full")]
 pub mod impls;
