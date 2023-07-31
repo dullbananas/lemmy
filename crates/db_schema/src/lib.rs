@@ -20,8 +20,13 @@ extern crate diesel_migrations;
 #[macro_use]
 extern crate async_trait;
 
+#[cfg(feature = "full")]
 #[macro_use]
 extern crate macro_rules_attribute;
+
+#[cfg(feature = "full")]
+#[macro_use]
+extern crate paste;
 
 #[cfg(feature = "full)]
 #[macro_use]
