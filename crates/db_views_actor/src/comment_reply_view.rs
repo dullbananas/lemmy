@@ -235,13 +235,14 @@ impl JoinView for CommentReplyView {
       my_vote,
     ): Self::JoinTuple,
   ) -> Self {
+    let comment = comment.into_full(comment.into_full(comment_reply.comment_id));
     Self {
       counts: counts.into_full(&comment),
       recipient: recipient.into_full(comment_reply.recipient_id),
       community: community.into_full(post.community_id),
       post: post.into_full(comment.post_id),
       creator: creator.into_full(comment.creator_id),
-      comment: comment.into_full(comment_reply.comment_id),
+      comment,
       comment_reply,
       creator_banned_from_community,
       subscribed,
