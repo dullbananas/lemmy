@@ -7,7 +7,7 @@ use diesel::{
   JoinOnDsl,
   NullableExpressionMethods,
   QueryDsl,
-  SelectableHelper,
+  Selectable,
   SelectableHelper,
 };
 use diesel_async::RunQueryDsl;
@@ -221,9 +221,9 @@ impl JoinView for PostReportView {
       resolver,
     ): Self::JoinTuple,
   ) -> Self {
+    let post = post.into_full(post_report.post_id);
     Self {
-      resolver: (resolver, post_report.resolver_id)
-        .zip()
+      resolver: Option::zip(resolver, post_report.resolver_id)
         .map(|(resolver, id)| resolver.into_full(id)),
       counts: counts.into_full(&post),
       my_vote,
@@ -231,7 +231,7 @@ impl JoinView for PostReportView {
       post_creator: post_creator.into_full(post.creator_id),
       creator: creator.into_full(post_report.creator_id),
       community: community.into_full(post.community_id),
-      post: post.into_full(post_report.post_id),
+      post,
       post_report,
     }
   }
