@@ -7,6 +7,7 @@ use diesel::{
   JoinOnDsl,
   NullableExpressionMethods,
   QueryDsl,
+  Selectable,
   SelectableHelper,
 };
 use diesel_async::RunQueryDsl;
@@ -47,7 +48,7 @@ fn queries<'a>() -> Queries<
         LocalUserWithoutId::as_select(),
         PersonWithoutId::as_select(),
         aliases::person1
-          .fields(PersonWithoutId::as_select())
+          .fields(<PersonWithoutId as Selectable<Pg>>::construct_selection())
           .nullable(),
       ))
   };
