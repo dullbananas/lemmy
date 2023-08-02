@@ -23,7 +23,7 @@ impl SiteView {
         local_site_rate_limit::all_columns,
         site_aggregates::all_columns,
       ))
-      .first::<(Site, LocalSite, LocalSiteRateLimit, SiteAggregates)>(conn)
+      .first::<(SiteWithoutId, LocalSite, LocalSiteRateLimit, SiteAggregates)>(conn)
       .await?;
 
     site.private_key = None;
