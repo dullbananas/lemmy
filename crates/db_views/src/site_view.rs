@@ -1,5 +1,5 @@
 use crate::structs::SiteView;
-use diesel::{result::Error, ExpressionMethods, JoinOnDsl, QueryDsl};
+use diesel::{result::Error, ExpressionMethods, JoinOnDsl, QueryDsl, SelectableHelper};
 use diesel_async::RunQueryDsl;
 use lemmy_db_schema::{
   aggregates::structs::SiteAggregates,
