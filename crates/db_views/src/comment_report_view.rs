@@ -251,6 +251,7 @@ impl JoinView for CommentReportView {
       resolver,
     ): Self::JoinTuple,
   ) -> Self {
+    let comment = comment.into_full(comment_report.comment_id);
     Self {
       resolver: resolver
         .zip(comment_report.resolver_id)
@@ -262,7 +263,7 @@ impl JoinView for CommentReportView {
       creator: creator.into_full(comment_report.creator_id),
       community: community.into_full(post.community_id),
       post: post.into_full(comment.post_id),
-      comment: comment.into_full(comment_report.comment_id),
+      comment,
       comment_report,
     }
   }
