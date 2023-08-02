@@ -30,7 +30,7 @@ use lemmy_db_schema::{
     comment::CommentWithoutId,
     comment_report::CommentReport,
     community::CommunityWithoutId,
-    person::PersonWithoutId,
+    person::{Person, PersonWithoutId},
     post::PostWithoutId,
   },
   traits::JoinView,
