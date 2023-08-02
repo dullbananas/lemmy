@@ -26,7 +26,7 @@ use lemmy_db_schema::{
   },
   source::{
     community::CommunityWithoutId,
-    person::PersonWithoutId,
+    person::{Person, PersonWithoutId},
     post::PostWithoutId,
     post_report::PostReport,
   },
