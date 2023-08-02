@@ -8,6 +8,7 @@ use diesel::{
   NullableExpressionMethods,
   QueryDsl,
   SelectableHelper,
+  SelectableHelper,
 };
 use diesel_async::RunQueryDsl;
 use lemmy_db_schema::{
@@ -80,11 +81,11 @@ fn queries<'a>() -> Queries<
         PostWithoutId::as_select(),
         CommunityWithoutId::as_select(),
         PersonWithoutId::as_select(),
-        aliases::person1.fields(PersonWithoutId::as_select()),
+        aliases::person1.fields(<PersonWithoutId as Selectable<Pg>>::construct_selection()),
         community_person_ban::id.nullable().is_not_null(),
         post_like::score.nullable(),
         PostAggregatesNotInPost::as_select(),
-        aliases::person2.fields(PersonWithoutId::as_select.nullable()),
+        aliases::person2.fields(<PersonWithoutId as Selectable<Pg>>::construct_selection().nullable()),
       ))
   };
 
