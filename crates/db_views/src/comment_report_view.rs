@@ -8,6 +8,7 @@ use diesel::{
   JoinOnDsl,
   NullableExpressionMethods,
   QueryDsl,
+  Selectable,
   SelectableHelper,
 };
 use diesel_async::RunQueryDsl;
@@ -70,12 +71,12 @@ fn queries<'a>() -> Queries<
     PostWithoutId::as_select(),
     CommunityWithoutId::as_select(),
     PersonWithoutId::as_select(),
-    aliases::person1.fields(PersonWithoutId::as_select()),
+    aliases::person1.fields(<PersonWithoutId as Selectable<Pg>>::construct_selection()),
     CommentAggregatesNotInComment::as_select(),
     community_person_ban::id.nullable().is_not_null(),
     comment_like::score.nullable(),
     aliases::person2
-      .fields(PersonWithoutId::as_select())
+      .fields(<PersonWithoutId as Selectable<Pg>>::construct_selection())
       .nullable(),
   );
 
