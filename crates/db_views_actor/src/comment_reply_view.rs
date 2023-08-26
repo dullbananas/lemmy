@@ -113,7 +113,7 @@ fn queries<'a>() -> Queries<
         aliases::person1.fields(person::all_columns),
         comment_aggregates::all_columns,
         community_person_ban::id.nullable().is_not_null(),
-        CommunityFollower::select_subscribed_type(),
+        CommunityFollower::select_subscribed_type(my_person_id),
         comment_saved::id.nullable().is_not_null(),
         person_block::id.nullable().is_not_null(),
         comment_like::score.nullable(),
