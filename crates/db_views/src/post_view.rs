@@ -166,7 +166,7 @@ fn queries<'a>() -> Queries<
         community::all_columns,
         is_creator_banned_from_community,
         post_aggregates::all_columns,
-        CommunityFollower::select_subscribed_type(),
+        CommunityFollower::select_subscribed_type(my_person_id),
         is_saved_selection,
         is_read_selection,
         is_creator_blocked_selection,
