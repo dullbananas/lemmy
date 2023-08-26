@@ -56,7 +56,7 @@ fn queries<'a>() -> Queries<
   let selection = (
     community::all_columns,
     community_aggregates::all_columns,
-    CommunityFollower::select_subscribed_type(),
+    CommunityFollower::select_subscribed_type(my_person_id),
     community_block::id.nullable().is_not_null(),
   );
 
