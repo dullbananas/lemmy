@@ -106,7 +106,7 @@ fn queries<'a>() -> Queries<
               .and(community_moderator::person_id.eq(user.person.id)),
           ),
         )
-        .load::<PostReportViewTuple>(&mut conn)
+        .load::<PostReportView>(&mut conn)
         .await
     } else {
       query.load::<PostReportView>(&mut conn).await
