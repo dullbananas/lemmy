@@ -316,14 +316,10 @@ mod tests {
 
   use crate::{
     comment_view::{
-      Comment,
       CommentQuery,
       CommentSortType,
       CommentView,
-      Community,
       DbPool,
-      Person,
-      Post,
     },
     structs::LocalUserView,
   };
@@ -333,14 +329,14 @@ mod tests {
     newtypes::LanguageId,
     source::{
       actor_language::LocalUserLanguage,
-      comment::{CommentInsertForm, CommentLike, CommentLikeForm},
-      community::CommunityInsertForm,
+      comment::{Comment, CommentInsertForm, CommentLike, CommentLikeForm},
+      community::{Community, CommunityInsertForm},
       instance::Instance,
       language::Language,
       local_user::{LocalUser, LocalUserInsertForm},
-      person::PersonInsertForm,
+      person::{Person, PersonInsertForm},
       person_block::{PersonBlock, PersonBlockForm},
-      post::PostInsertForm,
+      post::{Post, PostInsertForm},
     },
     traits::{Blockable, Crud, Likeable},
     utils::build_db_pool_for_tests,
