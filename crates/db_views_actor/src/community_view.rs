@@ -47,9 +47,9 @@ fn queries<'a>() -> Queries<
 
   let selection = (
     community::all_columns,
-    community_aggregates::all_columns,
     CommunityFollower::select_subscribed_type(),
     community_block::id.nullable().is_not_null(),
+    community_aggregates::all_columns,
   );
 
   let not_removed_or_deleted = community::removed
