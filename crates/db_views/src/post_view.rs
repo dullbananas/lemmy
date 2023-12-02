@@ -588,49 +588,47 @@ mod tests {
     let inserted_instance = Instance::read_or_create(pool, "my_domain.tld".to_string())
       .await?;
 
+    let person_insert_form = move |name| {
+      PersonInsertForm::builder()
+        .name(name)
+        .public_key("pubkey".to_string())
+        .instance_id(inserted_instance.id)
+        .build()
+    };
+
+    let local_user_form = move |person_id| {
+      LocalUserInsertForm::builder()
+        .person_id(person_id)
+        .password_encrypted(String::new())
+        .build()
+    };
+
     let person_name = "tegan".to_string();
 
-    let new_person = PersonInsertForm::builder()
-      .name(person_name.clone())
-      .public_key("pubkey".to_string())
-      .instance_id(inserted_instance.id)
-      .build();
+    let inserted_person = Person::create(pool, &person_insert_form(person_name.clone())).await?;
 
-    let inserted_person = Person::create(pool, &new_person).await?;
+    let inserted_local_user = LocalUser::create(pool, &LocalUserInsertForm {
+      admin: Some(true),
+      ..local_user_form(inserted_person.id)
+    }).await?;
 
-    let local_user_form = LocalUserInsertForm::builder()
-      .person_id(inserted_person.id)
-      .admin(Some(true))
-      .password_encrypted(String::new())
-      .build();
-    let inserted_local_user = LocalUser::create(pool, &local_user_form).await?;
+    let inserted_bot = Person::create(pool, &PersonInsertForm {
+      bot_account: Some(true),
+      ..person_insert_form("mybot".to_string())
+    }).await?;
 
-    let new_bot = PersonInsertForm::builder()
-      .name("mybot".to_string())
-      .bot_account(Some(true))
-      .public_key("pubkey".to_string())
-      .instance_id(inserted_instance.id)
-      .build();
 
-    let inserted_bot = Person::create(pool, &new_bot).await?;
-
-    let new_community = CommunityInsertForm::builder()
+    let inserted_community = Community::create(pool, &
+    CommunityInsertForm::builder()
       .name("test_community_3".to_string())
       .title("nada".to_owned())
       .public_key("pubkey".to_string())
       .instance_id(inserted_instance.id)
-      .build();
-
-    let inserted_community = Community::create(pool, &new_community).await?;
+      .build()
+                                              ).await?;
 
     // Test a person block, make sure the post query doesn't include their post
-    let blocked_person = PersonInsertForm::builder()
-      .name(person_name)
-      .public_key("pubkey".to_string())
-      .instance_id(inserted_instance.id)
-      .build();
-
-    let inserted_blocked_person = Person::create(pool, &blocked_person).await?;
+    let inserted_blocked_person = Person::create(pool, &person_insert_form(person_name)).await?;
 
     let post_from_blocked_person = PostInsertForm::builder()
       .name("blocked_person_post".to_string())
@@ -639,12 +637,7 @@ mod tests {
       .language_id(Some(LanguageId(1)))
       .build();
 
-    let blocked_local_user = LocalUserInsertForm::builder()
-      .person_id(inserted_blocked_person.id)
-      .password_encrypted(String::new())
-      .build();
-
-    let inserted_blocked_local_user = LocalUser::create(pool, &blocked_local_user).await?;
+    let inserted_blocked_local_user = LocalUser::create(pool, &local_user_insert_form(inserted_blocked_person.id)).await?;
 
     Post::create(pool, &post_from_blocked_person).await?;
 
@@ -657,22 +650,23 @@ mod tests {
     PersonBlock::block(pool, &person_block).await?;
 
     // A sample post
-    let new_post = PostInsertForm::builder()
+    let inserted_post = Post::create(pool, &
+    PostInsertForm::builder()
       .name("test post 3".to_string())
       .creator_id(inserted_person.id)
       .community_id(inserted_community.id)
       .language_id(Some(LanguageId(47)))
-      .build();
+      .build()
+                                    ).await?;
 
-    let inserted_post = Post::create(pool, &new_post).await?;
 
-    let new_bot_post = PostInsertForm::builder()
+    let _inserted_bot_post = Post::create(pool, &
+    PostInsertForm::builder()
       .name("test bot post".to_string())
       .creator_id(inserted_bot.id)
       .community_id(inserted_community.id)
-      .build();
-
-    let _inserted_bot_post = Post::create(pool, &new_bot_post).await?;
+      .build()
+                                         ).await?;
     let local_user_view = LocalUserView {
       local_user: inserted_local_user,
       person: inserted_person,
