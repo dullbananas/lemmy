@@ -534,9 +534,6 @@ impl<'a> PostQuery<'a> {
 
 #[cfg(test)]
 mod tests {
-  #![allow(clippy::unwrap_used)]
-  #![allow(clippy::indexing_slicing)]
-
   use crate::{
     post_view::{PostQuery, PostView},
     structs::LocalUserView,
@@ -706,14 +703,14 @@ mod tests {
                        )
         .await?;
 
-    let read_post_listing = PostQuery {
+    let post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
 
-    let post_listing_single_with_person = PostView::read(
+    let normal_post = PostView::read(
       pool,
       data.inserted_post.id,
       Some(data.local_user_view.person.id),
@@ -721,14 +718,13 @@ mod tests {
     )
     .await?;
 
-    let mut expected_post_listing_with_user = expected_post_view(&data, pool).await;
+    let expected_normal_post = expected_post_view(&data, pool).await;
 
     // Should be only one person, IE the bot post, and blocked should be missing
-    assert_eq!(vec![expected_post_listing_with_user], read_post_listing);
-    expected_post_listing_with_user.my_vote = None;
+    assert_eq!(vec![normal_post], post_list);
     assert_eq!(
-      expected_post_listing_with_user,
-      post_listing_single_with_person
+      expected_normal_post,
+      normal_post
     );
 
     data.local_user_view.local_user =
@@ -740,14 +736,17 @@ mod tests {
                        )
         .await?;
 
-    let post_listings_with_bots = PostQuery {
+    let post_list_with_bots = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
-    .await?;
+    .await?
+    .iter()
+    .map(|i| &i.post)
+    .collect::<Vec<_>>();
     // should include bot post which has "undetermined" language
-    assert_eq!(vec![&data.inserted_bot_post, &data.inserted_post], post_listings_with_bots.iter.map(|i| &i.post).collect::<Vec<_>>());
+    assert_eq!(vec![&data.inserted_bot_post, &data.inserted_post], post_list_with_bots);
 
     cleanup(data, pool).await
   }
@@ -759,7 +758,7 @@ mod tests {
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
-    let read_post_listing_multiple_no_person = PostQuery {
+    let post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       local_user: None,
       ..data.default_post_query()
@@ -767,22 +766,22 @@ mod tests {
     .list(pool)
     .await?;
 
-    let read_post_listing_single_no_person =
+    let post =
       PostView::read(pool, data.inserted_post.id, None, false)
         .await?;
 
-    let expected_post_listing_no_person = expected_post_view(&data, pool).await;
+    let expected_post = expected_post_view(&data, pool).await;
 
     // Should be 2 posts, with the bot post, and the blocked
-    assert_eq!(3, read_post_listing_multiple_no_person.len());
+    assert_eq!(3, post_list.len());
 
     assert_eq!(
-      expected_post_listing_no_person,
-      read_post_listing_multiple_no_person[1]
+      Some(expected_post),
+      post_list.get(1)
     );
     assert_eq!(
-      expected_post_listing_no_person,
-      read_post_listing_single_no_person
+      expected_post,
+      post
     );
 
     cleanup(data, pool).await
