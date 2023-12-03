@@ -555,7 +555,7 @@ mod tests {
       post::{Post, PostInsertForm, PostLike, PostLikeForm, PostUpdateForm},
     },
     traits::{Blockable, Crud, Joinable, Likeable},
-    utils::{build_db_pool_for_tests, DbPool, RANK_DEFAULT},
+    utils::{build_db_pool, DbPool, RANK_DEFAULT},
     SortType,
     SubscribedType,
   };
@@ -690,7 +690,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_with_person() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
