@@ -572,6 +572,7 @@ mod tests {
     inserted_bot: Person,
     inserted_community: Community,
     inserted_post: Post,
+    inserted_bot_post: Post,
   }
 
   impl Data {
@@ -630,24 +631,24 @@ mod tests {
     // Test a person block, make sure the post query doesn't include their post
     let inserted_blocked_person = Person::create(pool, &person_insert_form(person_name)).await?;
 
-    let post_from_blocked_person = PostInsertForm::builder()
+    let inserted_blocked_local_user = LocalUser::create(pool, &local_user_insert_form(inserted_blocked_person.id)).await?;
+
+    Post::create(pool, &
+    PostInsertForm::builder()
       .name("blocked_person_post".to_string())
       .creator_id(inserted_blocked_person.id)
       .community_id(inserted_community.id)
       .language_id(Some(LanguageId(1)))
-      .build();
-
-    let inserted_blocked_local_user = LocalUser::create(pool, &local_user_insert_form(inserted_blocked_person.id)).await?;
-
-    Post::create(pool, &post_from_blocked_person).await?;
+      .build()
+                ).await?;
 
     // block that person
-    let person_block = PersonBlockForm {
+    PersonBlock::block(pool, &
+    PersonBlockForm {
       person_id: inserted_person.id,
       target_id: inserted_blocked_person.id,
-    };
-
-    PersonBlock::block(pool, &person_block).await?;
+    }
+                      ).await?;
 
     // A sample post
     let inserted_post = Post::create(pool, &
@@ -660,7 +661,7 @@ mod tests {
                                     ).await?;
 
 
-    let _inserted_bot_post = Post::create(pool, &
+    let inserted_bot_post = Post::create(pool, &
     PostInsertForm::builder()
       .name("test bot post".to_string())
       .creator_id(inserted_bot.id)
@@ -685,6 +686,7 @@ mod tests {
       inserted_bot,
       inserted_community,
       inserted_post,
+      inserted_bot_post,
     })
   }
 
@@ -695,14 +697,14 @@ mod tests {
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
-    let local_user_form = LocalUserUpdateForm {
+    data.local_user_view.local_user =
+      LocalUser::update(pool, data.local_user_view.local_user.id, &
+    LocalUserUpdateForm {
       show_bot_accounts: Some(false),
       ..Default::default()
-    };
-    let inserted_local_user =
-      LocalUser::update(pool, data.local_user_view.local_user.id, &local_user_form)
+    }
+                       )
         .await?;
-    data.local_user_view.local_user = inserted_local_user;
 
     let read_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
@@ -722,23 +724,21 @@ mod tests {
     let mut expected_post_listing_with_user = expected_post_view(&data, pool).await;
 
     // Should be only one person, IE the bot post, and blocked should be missing
-    assert_eq!(1, read_post_listing.len());
-
-    assert_eq!(expected_post_listing_with_user, read_post_listing[0]);
+    assert_eq!(vec![expected_post_listing_with_user], read_post_listing);
     expected_post_listing_with_user.my_vote = None;
     assert_eq!(
       expected_post_listing_with_user,
       post_listing_single_with_person
     );
 
-    let local_user_form = LocalUserUpdateForm {
+    data.local_user_view.local_user =
+      LocalUser::update(pool, data.local_user_view.local_user.id, &
+    LocalUserUpdateForm {
       show_bot_accounts: Some(true),
       ..Default::default()
-    };
-    let inserted_local_user =
-      LocalUser::update(pool, data.local_user_view.local_user.id, &local_user_form)
+    }
+                       )
         .await?;
-    data.local_user_view.local_user = inserted_local_user;
 
     let post_listings_with_bots = PostQuery {
       community_id: Some(data.inserted_community.id),
@@ -747,7 +747,7 @@ mod tests {
     .list(pool)
     .await?;
     // should include bot post which has "undetermined" language
-    assert_eq!(2, post_listings_with_bots.len());
+    assert_eq!(vec![&data.inserted_bot_post, &data.inserted_post], post_listings_with_bots.iter.map(|i| &i.post).collect::<Vec<_>>());
 
     cleanup(data, pool).await
   }
