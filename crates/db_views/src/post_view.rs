@@ -587,15 +587,15 @@ mod tests {
         ..Default::default()
       }
     }
-
-    fn person_insert_form(&self, name: &str) -> PersonInsertForm {
+  }
+  
+    fn person_insert_form(&self, instance_id: InstanceId, name: &str) -> PersonInsertForm {
       PersonInsertForm::builder()
-        .name(name)
+        .name(name.to_owned())
         .public_key("pubkey".to_string())
-        .instance_id(self.inserted_instance.id)
+        .instance_id(instance_id)
         .build()
     }
-  }
 
   fn local_user_form(person_id: PersonId) -> LocalUserInsertForm {
       LocalUserInsertForm::builder()
@@ -608,9 +608,9 @@ mod tests {
     let inserted_instance = Instance::read_or_create(pool, "my_domain.tld".to_string())
       .await?;
 
-    let person_name = "tegan".to_string();
+    let person_insert_form = |name| person_insert_form(inserted_instance.id, name);
 
-    let inserted_person = Person::create(pool, &person_insert_form(person_name.clone())).await?;
+    let inserted_person = Person::create(pool, &person_insert_form("tegan").await?;
 
     let inserted_local_user = LocalUser::create(pool, &LocalUserInsertForm {
       admin: Some(true),
@@ -619,7 +619,7 @@ mod tests {
 
     let inserted_bot = Person::create(pool, &PersonInsertForm {
       bot_account: Some(true),
-      ..person_insert_form("mybot".to_string())
+      ..person_insert_form("mybot")
     }).await?;
 
 
@@ -633,7 +633,7 @@ mod tests {
                                               ).await?;
 
     // Test a person block, make sure the post query doesn't include their post
-    let inserted_blocked_person = Person::create(pool, &person_insert_form(person_name)).await?;
+    let inserted_blocked_person = Person::create(pool, &person_insert_form("john")).await?;
 
     let inserted_blocked_local_user = LocalUser::create(pool, &local_user_insert_form(inserted_blocked_person.id)).await?;
 
@@ -803,14 +803,14 @@ mod tests {
     };
     CommunityBlock::block(pool, &community_block).await?;
 
-    let read_post_listings_with_person_after_block = PostQuery {
+    let post_list_after_block = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
     // Should be 0 posts after the community block
-    assert_eq!(vec![], read_post_listings_with_person_after_block);
+    assert_eq!(vec![], post_list_after_block);
 
     CommunityBlock::unblock(pool, &community_block)
       .await?;
@@ -820,17 +820,17 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_like() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
-    let post_like_form = PostLikeForm {
+    let inserted_post_like = PostLike::like(pool, &
+    PostLikeForm {
       post_id: data.inserted_post.id,
       person_id: data.local_user_view.person.id,
       score: 1,
-    };
-
-    let inserted_post_like = PostLike::like(pool, &post_like_form).await?;
+    }
+                                           ).await?;
 
     let expected_post_like = PostLike {
       post_id: data.inserted_post.id,
@@ -840,7 +840,7 @@ mod tests {
     };
     assert_eq!(expected_post_like, inserted_post_like);
 
-    let post_listing_single_with_person = PostView::read(
+    let post = PostView::read(
       pool,
       data.inserted_post.id,
       Some(data.local_user_view.person.id),
@@ -852,42 +852,42 @@ mod tests {
     expected_post_with_upvote.my_vote = Some(1);
     expected_post_with_upvote.counts.score = 1;
     expected_post_with_upvote.counts.upvotes = 1;
-    assert_eq!(expected_post_with_upvote, post_listing_single_with_person);
+    assert_eq!(expected_post_with_upvote, post);
 
-    let local_user_form = LocalUserUpdateForm {
+    data.local_user_view.local_user = 
+      LocalUser::update(pool, data.local_user_view.local_user.id, &
+    LocalUserUpdateForm {
       show_bot_accounts: Some(false),
       ..Default::default()
-    };
-    let inserted_local_user =
-      LocalUser::update(pool, data.local_user_view.local_user.id, &local_user_form)
+    }
+                       )
         .await?;
-    data.local_user_view.local_user = inserted_local_user;
 
-    let read_post_listing = PostQuery {
+    let post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(vec![expected_post_vith_upvote], read_post_listing);
+    assert_eq!(vec![expected_post_vith_upvote], post_list);
 
-    let read_liked_post_listing = PostQuery {
+    let liked_post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       liked_only: true,
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(read_post_listing, read_liked_post_listing);
+    assert_eq!(post_list, liked_post_list);
 
-    let read_disliked_post_listing = PostQuery {
+    let disliked_post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       disliked_only: true,
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(vec![], read_disliked_post_listing);
+    assert_eq!(vec![], disliked_post_list);
 
     let like_removed =
       PostLike::remove(pool, data.local_user_view.person.id, data.inserted_post.id)
@@ -904,25 +904,24 @@ mod tests {
     let data = init_data(pool).await?;
 
     // Make one of the inserted persons a moderator
-    let person_id = data.local_user_view.person.id;
-    let community_id = data.inserted_community.id;
-    let form = CommunityModeratorForm {
-      community_id,
-      person_id,
-    };
-    CommunityModerator::join(pool, &form).await?;
+    CommunityModerator::join(pool, &
+    CommunityModeratorForm {
+      community_id: data.inserted_community.id,
+      person_id: data.local_user_view.person.id,
+    }
+                            ).await?;
 
-    let post_listing = PostQuery {
+    let post_list = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?
     .into_iter()
-    .map(|i| (i.creator.name, i.creator_is_moderator, i.creator_is_admin))
+    .map(|p| (p.creator.name, p.creator_is_moderator, p.creator_is_admin))
     .collect::<Vec<_>>();
 
-    let expected_post_listing = vec![
+    let expected_post_list = vec![
       ("mybot".to_owned(), false, false),
       ("tegan".to_owned(), true, true),
     ];
@@ -935,6 +934,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_person_language() -> LemmyResult<()> {
+    const EL_POSTO: &str = "el posto";
     let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
@@ -943,7 +943,7 @@ mod tests {
       .await?
       .unwrap();
     let post_spanish = PostInsertForm::builder()
-      .name("asffgdsc".to_string())
+      .name(SPANISH_POST.to_string())
       .creator_id(data.local_user_view.person.id)
       .community_id(data.inserted_community.id)
       .language_id(Some(spanish_id))
@@ -951,10 +951,10 @@ mod tests {
 
     Post::create(pool, &post_spanish).await?;
 
-    let post_listings_all = data.default_post_query().list(pool).await?;
+    let post_list = data.default_post_query().list(pool).await?;
 
     // no language filters specified, all posts should be returned
-    assert_eq!(3, post_listings_all.len());
+    assert_eq!(vec![EL_POSTO, POST_BY_BOT, POST], names(&post_list));
 
     let french_id = Language::read_id_from_code(pool, Some("fr"))
       .await?
@@ -962,13 +962,11 @@ mod tests {
     LocalUserLanguage::update(pool, vec![french_id], data.local_user_view.local_user.id)
       .await?;
 
-    let post_listing_french = data.default_post_query().list(pool).await?;
+    let french_post_list = data.default_post_query().list(pool).await?;
 
     // only one post in french and one undetermined should be returned
-    assert_eq!(2, post_listing_french.len());
-    assert!(post_listing_french
-      .iter()
-      .any(|p| p.post.language_id == french_id));
+    assert_eq!(vec![POST_BY_BOT, POST], names(&french_post_list));
+    assert_eq!(Some(french_id), french_post_list.get(1).map(|p| p.post.language_id));
 
     LocalUserLanguage::update(
       pool,
@@ -976,15 +974,14 @@ mod tests {
       data.local_user_view.local_user.id,
     )
     .await?;
-    let post_listings_french_und = data.default_post_query().list(pool).await?;
+    let french_und_post_list = data.default_post_query().list(pool).await?.into_iter().map(|p| (p.post.name, p.language_id)).collect::<Vec<_>>();
+    let expected_french_und_post_list = vec![
+      (POST_BY_BOT, UNDETERMINED_ID),
+      (POST, french_id),
+    ];
 
     // french post and undetermined language post should be returned
-    assert_eq!(2, post_listings_french_und.len());
-    assert_eq!(
-      UNDETERMINED_ID,
-      post_listings_french_und[0].post.language_id
-    );
-    assert_eq!(french_id, post_listings_french_und[1].post.language_id);
+    assert_eq!(expected_french_und_post_list, french_und_post_list);
 
     cleanup(data, pool).await
   }
@@ -992,7 +989,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listings_removed() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
@@ -1008,18 +1005,18 @@ mod tests {
     .await?;
 
     // Make sure you don't see the removed post in the results
-    let post_listings_no_admin = data.default_post_query().list(pool).await?;
-    assert_eq!(1, post_listings_no_admin.len());
+    let post_list = data.default_post_query().list(pool).await?;
+    assert_eq!(vec![POST_BY_BOT], names(&post_list));
 
     // Removed post is shown to admins on profile page
     data.local_user_view.local_user.admin = true;
-    let post_listings_is_admin = PostQuery {
+    let post_list_for_admin = PostQuery {
       is_profile_view: true,
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(2, post_listings_is_admin.len());
+    assert_eq!(vec![POST_BY_BOT, POST], names(&post_list_for_admin));
 
     cleanup(data, pool).await
   }
