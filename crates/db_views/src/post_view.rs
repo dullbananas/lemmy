@@ -562,6 +562,14 @@ mod tests {
   use lemmy_utils::error::LemmyResult;
   use serial_test::serial;
 
+  const POST_BY_BLOCKED_PERSON: &str = "post by blocked person";
+  const POST_BY_BOT: &str = "post by bot";
+  const POST: &str = "post";
+
+  fn names(post_views: &[PostView]) -> Vec<&str> {
+    post_views.iter().map(|i| &i.post.name).collect()
+  }
+
   struct Data {
     inserted_instance: Instance,
     local_user_view: LocalUserView,
@@ -569,7 +577,6 @@ mod tests {
     inserted_bot: Person,
     inserted_community: Community,
     inserted_post: Post,
-    inserted_bot_post: Post,
   }
 
   impl Data {
@@ -632,7 +639,7 @@ mod tests {
 
     Post::create(pool, &
     PostInsertForm::builder()
-      .name("blocked_person_post".to_string())
+      .name(POST_BY_BLOCKED_PERSON.to_string())
       .creator_id(inserted_blocked_person.id)
       .community_id(inserted_community.id)
       .language_id(Some(LanguageId(1)))
@@ -650,7 +657,7 @@ mod tests {
     // A sample post
     let inserted_post = Post::create(pool, &
     PostInsertForm::builder()
-      .name("test post 3".to_string())
+      .name(POST.to_string())
       .creator_id(inserted_person.id)
       .community_id(inserted_community.id)
       .language_id(Some(LanguageId(47)))
@@ -658,9 +665,9 @@ mod tests {
                                     ).await?;
 
 
-    let inserted_bot_post = Post::create(pool, &
+    let _inserted_bot_post = Post::create(pool, &
     PostInsertForm::builder()
-      .name("test bot post".to_string())
+      .name(POST_BY_BOT.to_string())
       .creator_id(inserted_bot.id)
       .community_id(inserted_community.id)
       .build()
@@ -683,7 +690,6 @@ mod tests {
       inserted_bot,
       inserted_community,
       inserted_post,
-      inserted_bot_post,
     })
   }
 
@@ -710,7 +716,7 @@ mod tests {
     .list(pool)
     .await?;
 
-    let normal_post = PostView::read(
+    let post = PostView::read(
       pool,
       data.inserted_post.id,
       Some(data.local_user_view.person.id),
@@ -718,13 +724,13 @@ mod tests {
     )
     .await?;
 
-    let expected_normal_post = expected_post_view(&data, pool).await;
+    let expected_post = expected_post_view(&data, pool).await;
 
     // Should be only one person, IE the bot post, and blocked should be missing
-    assert_eq!(vec![normal_post], post_list);
+    assert_eq!(vec![post], post_list);
     assert_eq!(
-      expected_normal_post,
-      normal_post
+      expected_post,
+      post
     );
 
     data.local_user_view.local_user =
@@ -741,12 +747,9 @@ mod tests {
       ..data.default_post_query()
     }
     .list(pool)
-    .await?
-    .iter()
-    .map(|i| &i.post)
-    .collect::<Vec<_>>();
+    .await?;
     // should include bot post which has "undetermined" language
-    assert_eq!(vec![&data.inserted_bot_post, &data.inserted_post], post_list_with_bots);
+    assert_eq!(vec![POST_BY_BOT, POST], names(&post_list_with_bots));
 
     cleanup(data, pool).await
   }
@@ -754,7 +757,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_no_person() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
@@ -773,7 +776,7 @@ mod tests {
     let expected_post = expected_post_view(&data, pool).await;
 
     // Should be 2 posts, with the bot post, and the blocked
-    assert_eq!(3, post_list.len());
+    assert_eq!([POST_BY_BOT, POST, POST_BY_BLOCKED_PERSON], names(&post_list));
 
     assert_eq!(
       Some(expected_post),
@@ -790,7 +793,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_block_community() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
@@ -807,7 +810,7 @@ mod tests {
     .list(pool)
     .await?;
     // Should be 0 posts after the community block
-    assert_eq!(0, read_post_listings_with_person_after_block.len());
+    assert_eq!(vec![], read_post_listings_with_person_after_bloc);
 
     CommunityBlock::unblock(pool, &community_block)
       .await?;
@@ -866,9 +869,7 @@ mod tests {
     }
     .list(pool)
     .await?;
-    assert_eq!(1, read_post_listing.len());
-
-    assert_eq!(expected_post_with_upvote, read_post_listing[0]);
+    assert_eq!(vec![expected_post_vith_upvote], read_post_listing);
 
     let read_liked_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
@@ -886,7 +887,7 @@ mod tests {
     }
     .list(pool)
     .await?;
-    assert!(read_disliked_post_listing.is_empty());
+    assert_eq!(vec![], read_disliked_post_listing);
 
     let like_removed =
       PostLike::remove(pool, data.local_user_view.person.id, data.inserted_post.id)
@@ -897,8 +898,8 @@ mod tests {
 
   #[tokio::test]
   #[serial]
-  async fn creator_is_moderator() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+  async fn creator_is_moderator_or_admin() -> LemmyResult<()> {
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
@@ -916,36 +917,17 @@ mod tests {
       ..data.default_post_query()
     }
     .list(pool)
-    .await?;
+    .await?
+    .into_iter()
+    .map(|i| (i.creator.name, i.creator_is_moderator, i.creator_is_admin))
+    .collect::<Vec<_>>();
 
-    assert_eq!(post_listing[0].creator.name, "mybot");
-    assert!(!post_listing[0].creator_is_moderator);
+    let expected_post_listing = vec![
+      ("mybot".to_owned(), false, false),
+      ("tegan".to_owned(), true, true),
+    ];
 
-    assert_eq!(post_listing[1].creator.name, "tegan");
-    assert!(post_listing[1].creator_is_moderator);
-
-    cleanup(data, pool).await
-  }
-
-  #[tokio::test]
-  #[serial]
-  async fn creator_is_admin() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
-    let pool = &mut pool.into();
-    let data = init_data(pool).await?;
-
-    let post_listing = PostQuery {
-      community_id: Some(data.inserted_community.id),
-      ..data.default_post_query()
-    }
-    .list(pool)
-    .await?;
-
-    assert_eq!(post_listing[0].creator.name, "mybot");
-    assert!(!post_listing[0].creator_is_admin);
-
-    assert_eq!(post_listing[1].creator.name, "tegan");
-    assert!(post_listing[1].creator_is_admin);
+    assert_eq!(expected_post_listing, post_listing);
 
     cleanup(data, pool).await
   }
