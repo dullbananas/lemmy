@@ -587,26 +587,26 @@ mod tests {
         ..Default::default()
       }
     }
+
+    fn person_insert_form(&self, name: &str) -> PersonInsertForm {
+      PersonInsertForm::builder()
+        .name(name)
+        .public_key("pubkey".to_string())
+        .instance_id(self.inserted_instance.id)
+        .build()
+    }
+  }
+
+  fn local_user_form(person_id: PersonId) -> LocalUserInsertForm {
+      LocalUserInsertForm::builder()
+        .person_id(person_id)
+        .password_encrypted(String::new())
+        .build()
   }
 
   async fn init_data(pool: &mut DbPool<'_>) -> LemmyResult<Data> {
     let inserted_instance = Instance::read_or_create(pool, "my_domain.tld".to_string())
       .await?;
-
-    let person_insert_form = move |name| {
-      PersonInsertForm::builder()
-        .name(name)
-        .public_key("pubkey".to_string())
-        .instance_id(inserted_instance.id)
-        .build()
-    };
-
-    let local_user_form = move |person_id| {
-      LocalUserInsertForm::builder()
-        .person_id(person_id)
-        .password_encrypted(String::new())
-        .build()
-    };
 
     let person_name = "tegan".to_string();
 
@@ -810,7 +810,7 @@ mod tests {
     .list(pool)
     .await?;
     // Should be 0 posts after the community block
-    assert_eq!(vec![], read_post_listings_with_person_after_bloc);
+    assert_eq!(vec![], read_post_listings_with_person_after_block);
 
     CommunityBlock::unblock(pool, &community_block)
       .await?;
@@ -935,7 +935,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listing_person_language() -> LemmyResult<()> {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
