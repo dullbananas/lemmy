@@ -935,6 +935,7 @@ mod tests {
   #[serial]
   async fn post_listing_person_language() -> LemmyResult<()> {
     const EL_POSTO: &str = "el posto";
+
     let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
@@ -1024,7 +1025,7 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn post_listings_deleted() {
-    let pool = &build_db_pool_for_tests().await;
+    let pool = &build_db_pool().await?;
     let pool = &mut pool.into();
     let data = init_data(pool).await?;
 
@@ -1039,39 +1040,22 @@ mod tests {
     )
     .await?;
 
-    // Make sure you don't see the deleted post in the results
-    let post_listings_no_creator = PostQuery {
-      local_user: None,
-      ..data.default_post_query()
-    }
-    .list(pool)
-    .await?;
-    let not_contains_deleted = post_listings_no_creator
-      .iter()
-      .map(|p| p.post.id)
-      .all(|p| p != data.inserted_post.id);
-    assert!(not_contains_deleted);
+    for (local_user, expect_contains_deleted) in [
+      (None, false),
+      (Some(&data.blocked_local_user_view), false),
+      (Some(&data.local_user_view), true),
+    ] {
+      let contains_deleted = PostQuery {
+        local_user,
+        ..data.default_post_query()
+      }
+      .list(pool)
+      .await?
+        .iter()
+        .any(|p| p.post.id == data.inserted_post.id);
 
-    // Deleted post is hidden from other users
-    let post_listings_is_other_user = PostQuery {
-      local_user: Some(&data.blocked_local_user_view),
-      ..data.default_post_query()
+      assert_eq!(expect_contains_deleted, contains_deleted);
     }
-    .list(pool)
-    .await?;
-    let not_contains_deleted_2 = post_listings_is_other_user
-      .iter()
-      .map(|p| p.post.id)
-      .all(|p| p != data.inserted_post.id);
-    assert!(not_contains_deleted_2);
-
-    // Deleted post is shown to creator
-    let post_listings_is_creator = data.default_post_query().list(pool).await?;
-    let contains_deleted = post_listings_is_creator
-      .iter()
-      .map(|p| p.post.id)
-      .any(|p| p == data.inserted_post.id);
-    assert!(contains_deleted);
 
     cleanup(data, pool).await
   }
