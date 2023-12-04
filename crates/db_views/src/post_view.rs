@@ -50,6 +50,7 @@ use lemmy_db_schema::{
     BoxExpr,
     DbPool,
     FilterVarEq,
+    FirstOrLoad,
   },
   ListingType,
   SortType,
@@ -120,63 +121,299 @@ macro_rules! asc {
   }};
 }
 
-type BoxedQuery<'a> = dsl::IntoBoxed<
-  'a,
-  type_chain!(post_aggregates::table.InnerJoin<person::table>.InnerJoin<community::table>.InnerJoin<post::table>),
-  Pg,
->;
-
-type QS = type_chain!(post_aggregates::table.InnerJoinQuerySource<person::table>.InnerJoinQuerySource<community::table>.InnerJoinQuerySource<post::table>);
-
-type SelectionType = (
-  post::SqlType,
-  person::SqlType,
-  community::SqlType,
-  st::Bool,
-  st::Bool,
-  st::Bool,
-  post_aggregates::SqlType,
-  st::Nullable<st::Bool>,
-  st::Bool,
-  st::Bool,
-  st::Bool,
-  st::Nullable<st::SmallInt>,
-  st::BigInt,
-);
-
-struct SelectionBuilder {
-  subscribe: Box<dyn Fn() -> BoxExpr<QS, st::Nullable<st::Bool>>>,
-  saved: BoxExpr<QS, st::Bool>,
-  read: BoxExpr<QS, st::Bool>,
-  creator_blocked: BoxExpr<QS, st::Bool>,
-  my_vote: BoxExpr<QS, st::Nullable<st::SmallInt>>,
-  me: Option<PersonId>,
+enum QueryInput<'a> {
+  Read {
+    post_id: PostId,
+    me: Option<PersonId>,
+    is_mod_or_admin: bool,
+  },
+  List {
+    options: PostQuery<'a>,
+  }
 }
 
-impl SelectionBuilder {
-  fn build(self) -> BoxExpr<QS, SelectionType> {
-    sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::BigInt);
+sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::BigInt);
 
-    let creator_banned_from_community = exists(
-      community_person_ban::table
-        .find((post_aggregates::creator_id, post_aggregates::community_id)),
-    );
-    let creator_is_moderator = exists(
-      community_moderator::table.find((post_aggregates::creator_id, post_aggregates::community_id)),
-    );
-    let creator_is_admin = exists(
-      local_user::table
-        .filter(local_user::person_id.eq(post_aggregates::creator_id))
-        .filter(local_user::admin),
-    );
-    let read_comments: BoxExpr<_, st::Nullable<st::BigInt>> = and_then(self.me, |me| {
-      person_post_aggregates::table
-        .find((me, post_aggregates::post_id))
-        .select(person_post_aggregates::read_comments.nullable())
-        .single_value()
-    });
+async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Result<impl FirstOrLoad<'a, PostView>, Error> {
+  let new_query = || post_aggregates::table
+    .inner_join(person::table)
+    .inner_join(community::table)
+    .inner_join(post::table)
+    .into_boxed();
 
-    Box::new((
+  let me = match input {
+    QueryInput::Read{me, ..} => me,
+    QueryInput::List{local_user, ..}=>local_user.person.id,
+  };
+
+  let mut subscribe = move || {
+      and_then(me, |me| {
+        community_follower::table
+          .find((me, post_aggregates::community_id))
+          .select(community_follower::pending.nullable())
+          .single_value()
+      })
+  };
+  let mut saved = is_some_and(me, |me| {
+    exists(post_saved::table.find((me, post_aggregates::post_id)))
+  });
+  let mut read = is_some_and(me, |me| {
+    exists(post_read::table.find((me, post_aggregates::post_id)))
+  });
+  let mut creator_blocked = is_some_and(me, |me| {
+    exists(person_block::table.find((me, post_aggregates::creator_id)))
+  });
+  let mut my_vote = and_then(me, |me| {
+    post_like::table
+      .find((me, post_aggregates::post_id))
+      .select(post_like::score.nullable())
+      .single_value()
+  });
+  let not_removed = not(community::removed.or(post::removed));
+  let not_deleted = not(community::deleted.or(post::deleted));
+  let is_creator = post_aggregates::creator_id.nullable().eq(me);
+  let creator_banned_from_community = exists(
+    community_person_ban::table
+      .find((post_aggregates::creator_id, post_aggregates::community_id)),
+  );
+  let creator_is_moderator = exists(
+    community_moderator::table.find((post_aggregates::creator_id, post_aggregates::community_id)),
+  );
+  let creator_is_admin = exists(
+    local_user::table
+      .filter(local_user::person_id.eq(post_aggregates::creator_id))
+      .filter(local_user::admin),
+  );
+  let read_comments = and_then(self.me, |me| {
+    person_post_aggregates::table
+      .find((me, post_aggregates::post_id))
+      .select(person_post_aggregates::read_comments.nullable())
+      .single_value()
+  });
+
+  Ok(match input {
+    QueryInput::Read{post_id, me, is_mod_or_admin} => {
+      let mut query = new_query().filter(post_aggregates::post_id.eq(post_id));
+  
+      if !is_mod_or_admin {
+        // only show removed or deleted posts to creator
+        query = query.filter(is_creator.or(not_removed.and(not_deleted)));
+      }
+
+      query
+    },
+    QueryInput::List{options} => {
+      let (limit, mut offset) = limit_and_offset(options.page, options.limit)?;
+      let listing_type = options.listing_type.unwrap_or(ListingType::All);
+      let sort = options.sort.unwrap_or(SortType::Hot);
+      let local_user = options.local_user.map(|l| &l.local_user);
+
+      let admin = local_user.map(|l| l.admin).unwrap_or(false);
+      let show_nsfw = local_user.map(|l| l.show_nsfw).unwrap_or(false);
+      let show_bot_accounts = local_user.map(|l| l.show_bot_accounts).unwrap_or(true);
+      let show_read_posts = local_user.map(|l| l.show_read_posts).unwrap_or(true);
+  
+      if options.page_after.is_some() {
+        if offset != 0 {
+          return Err(Error::QueryBuilderError(
+            "legacy pagination cannot be combined with v2 pagination".into(),
+          ));
+        }
+  
+        // always skip exactly one post because that's the last post of the previous page
+        // fixing the where clause is more difficult because we'd have to change only the last order-by-where clause
+        // e.g. WHERE (featured_local<=, hot_rank<=, published<=) to WHERE (<=, <=, <)
+        offset = 1;
+      }
+  
+      let build_inner_query = |page_before_or_equal: Option<PaginationCursorData>| {
+        let mut query = new_query();
+  
+        let i_subscribed = || subscribe().is_not_null();
+  
+        query = query
+          // hide posts from deleted communities
+          .filter(not(community::deleted))
+          // only show deleted posts to creator
+          .filter(is_creator(me).or(not(post::deleted)));
+  
+        // only show removed posts to admin when viewing user profile
+        if !(options.is_profile_view && admin) {
+          query = query.filter(not_removed());
+        }
+  
+        if let Some(community_id) = options.community_id {
+          query = query.filter(post_aggregates::community_id.eq(community_id));
+        }
+        if let Some(creator_id) = options.creator_id {
+          query = query.filter(post_aggregates::creator_id.eq(creator_id));
+        }
+        if let Some(url_search) = &options.url_search {
+          query = query.filter(post::url.eq(url_search));
+        }
+        if let Some(search_term) = &options.search_term {
+          let pattern = fuzzy_search(search_term);
+          let name_matches = post::name.ilike(pattern.clone());
+          let body_matches = post::body.ilike(pattern);
+          query = query.filter(name_matches.or(body_matches));
+        }
+  
+        query = match listing_type {
+          ListingType::Subscribed => query.filter(i_subscribed()),
+          ListingType::Local => query.filter(community::local),
+          ListingType::All => query,
+          ListingType::ModeratorView => query.filter(is_some_and(me, |me| {
+            exists(community_moderator::table.find((me, post_aggregates::community_id)))
+          })),
+        };
+  
+        // Filters that should not affect which posts can be moderated
+        if listing_type != ListingType::ModeratorView {
+          // If a user is logged in, then only show posts with a language that the user enabled.
+          if let Some(local_user) = local_user {
+            query = query.filter(exists(
+              local_user_language::table.find((local_user.id, post::language_id)),
+            ));
+          }
+  
+          // Hide posts from blocked instances, communities, and persons
+          query = query
+            .filter_var_eq(&mut selection_builder.creator_blocked, false)
+            .filter(not(is_some_and(me, |me| {
+              let community_blocked =
+                exists(community_block::table.find((me, post_aggregates::community_id)));
+              let instance_blocked =
+                exists(instance_block::table.find((me, post_aggregates::instance_id)));
+              community_blocked.or(instance_blocked)
+            })));
+  
+          // This filter hides hidden communities for non-subscribers. For `ListingType::Subscribed`,
+          // it is redundant and would cause a duplicated `community_follower` subquery.
+          if listing_type != ListingType::Subscribed {
+            query = query.filter(i_subscribed().or(not(community::hidden)));
+          }
+        }
+  
+        if !show_nsfw {
+          query = query.filter(not(post::nsfw.or(community::nsfw)));
+        }
+        if !show_bot_accounts {
+          query = query.filter(not(person::bot_account));
+        }
+        if !(show_read_posts || options.saved_only || options.is_profile_view) {
+          query = query.filter_var_eq(&mut selection_builder.read, false);
+        }
+        if options.saved_only {
+          query = query.filter_var_eq(&mut selection_builder.saved, true);
+        }
+        if options.liked_only {
+          query = query.filter_var_eq(&mut selection_builder.my_vote, 1);
+        }
+        if options.disliked_only {
+          query = query.filter_var_eq(&mut selection_builder.my_vote, -1);
+        }
+  
+        // Show featured posts first
+        let featured_sort: &dyn OrderAndPageFilter = if options.community_id.is_some() {
+          desc!(featured_community)
+        } else {
+          desc!(featured_local)
+        };
+  
+        let (main_sort, top_sort_interval): (&dyn OrderAndPageFilter, Option<PgInterval>) = match sort
+        {
+          SortType::Active => (desc!(hot_rank_active), None),
+          SortType::Hot => (desc!(hot_rank), None),
+          SortType::Scaled => (desc!(scaled_rank), None),
+          SortType::Controversial => (desc!(controversy_rank), None),
+          SortType::New => (desc!(published), None),
+          SortType::Old => (asc!(published), None),
+          SortType::NewComments => (desc!(newest_comment_time), None),
+          SortType::MostComments => (desc!(comments), None),
+          SortType::TopAll => (desc!(score), None),
+          SortType::TopYear => (desc!(score), Some(1.years())),
+          SortType::TopMonth => (desc!(score), Some(1.months())),
+          SortType::TopWeek => (desc!(score), Some(1.weeks())),
+          SortType::TopDay => (desc!(score), Some(1.days())),
+          SortType::TopHour => (desc!(score), Some(1.hours())),
+          SortType::TopSixHour => (desc!(score), Some(6.hours())),
+          SortType::TopTwelveHour => (desc!(score), Some(12.hours())),
+          SortType::TopThreeMonths => (desc!(score), Some(3.months())),
+          SortType::TopSixMonths => (desc!(score), Some(6.months())),
+          SortType::TopNineMonths => (desc!(score), Some(9.months())),
+        };
+  
+        let newest_sort: Option<&dyn OrderAndPageFilter> = match sort {
+          // A second time-based sort would not be very useful
+          SortType::New | SortType::Old | SortType::NewComments => None,
+          _ => Some(desc!(published)),
+        };
+  
+        for i in [Some(featured_sort), Some(main_sort), newest_sort]
+          .into_iter()
+          .flatten()
+        {
+          query = i.order_and_page_filter(query, &options.page_after, &page_before_or_equal);
+        }
+  
+        if let Some(interval) = top_sort_interval {
+          query = query.filter(post_aggregates::published.gt(now() - interval));
+        }
+  
+        query = query
+          .limit(limit)
+          .offset(offset);
+  
+        debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
+  
+        query
+      };
+  
+      let page_before_or_equal = if listing_type == ListingType::Subscribed {
+        // first get one page for the most popular community to get an upper bound for the the page end for the real query
+        //
+        // the reason this is needed is that when fetching posts for a single community PostgreSQL can optimize
+        // the query to use an index on e.g. (=, >=, >=, >=) and fetch only LIMIT rows
+        // but for the followed-communities query it has to query the index on (IN, >=, >=, >=)
+        // which it currently can't do at all (as of PG 16). see the discussion here:
+        // https://github.com/LemmyNet/lemmy/issues/2877#issuecomment-1673597190
+        //
+        // the results are correct no matter which community we fetch these for, since it basically covers the "worst case" of the whole page consisting of posts from one community
+        // but using the largest community decreases the pagination-frame so make the real query more efficient.
+  
+        let largest_subscribed: Option<CommunityId> = community_aggregates::table
+          .filter(is_some_and(me, |me| {
+            exists(community_follower::table.find((me, community_aggregates::community_id)))
+          }))
+          .order_by(community_aggregates::users_active_month.desc())
+          .select(community_aggregates::community_id)
+          .first(&mut *get_conn(pool).await?)
+          .await
+          .optional()?;
+  
+        let Some(largest_subscribed) = largest_subscribed else {
+          // nothing subscribed to? no posts
+          return Ok(vec![]);
+        };
+  
+        build_inner_query(None)
+          .filter(post_aggregates::community_id.eq(largest_subscribed))
+          // If there's at least `limit` rows, then get the last row within the limit, otherwise
+          // get `None` which prevents the amount of rows returned by the final query from being
+          // incorrectly limited
+          .offset(offset + limit - 1)
+          .select(post_aggregates::all_columns)
+          .first(&mut *get_conn(pool).await?)
+          .await
+          .optional()?
+          .map(PaginationCursorData)
+      } else {
+        None
+      };
+  
+      build_inner_query(page_before_or_equal)
+    },
+  }.select((
       post::all_columns,
       person::all_columns,
       community::all_columns,
@@ -184,66 +421,20 @@ impl SelectionBuilder {
       creator_is_moderator,
       creator_is_admin,
       post_aggregates::all_columns,
-      (self.subscribe)(),
-      self.saved,
-      self.read,
-      self.creator_blocked,
-      self.my_vote,
+      subscribe(),
+      saved,
+      read,
+      creator_blocked,
+      my_vote,
       post_aggregates::comments - coalesce(read_comments, 0),
-    ))
-  }
+  )))
 }
 
-fn new_query<'a>(me: Option<PersonId>) -> (BoxedQuery<'a>, SelectionBuilder) {
-  let query = post_aggregates::table
-    .inner_join(person::table)
-    .inner_join(community::table)
-    .inner_join(post::table)
-    .into_boxed();
-
-  let selection_builder = SelectionBuilder {
-    subscribe: Box::new(move || {
-      and_then(me, |me| {
-        community_follower::table
-          .find((me, post_aggregates::community_id))
-          .select(community_follower::pending.nullable())
-          .single_value()
-      })
-    }),
-    saved: is_some_and(me, |me| {
-      exists(post_saved::table.find((me, post_aggregates::post_id)))
-    }),
-    read: is_some_and(me, |me| {
-      exists(post_read::table.find((me, post_aggregates::post_id)))
-    }),
-    creator_blocked: is_some_and(me, |me| {
-      exists(person_block::table.find((me, post_aggregates::creator_id)))
-    }),
-    my_vote: and_then(me, |me| {
-      post_like::table
-        .find((me, post_aggregates::post_id))
-        .select(post_like::score.nullable())
-        .single_value()
-    }),
-    me,
-  };
-
-  (query, selection_builder)
-}
-
-fn not_removed() -> dsl::not<dsl::Or<community::removed, post::removed>> {
-  not(community::removed.or(post::removed))
-}
-
-fn not_deleted() -> dsl::not<dsl::Or<community::deleted, post::deleted>> {
-  not(community::deleted.or(post::deleted))
-}
-
-fn is_creator(
-  me: Option<PersonId>,
-) -> dsl::Eq<dsl::Nullable<post_aggregates::creator_id>, Option<PersonId>> {
-  post_aggregates::creator_id.nullable().eq(me)
-}
+type BoxedQuery<'a> = dsl::IntoBoxed<
+  'a,
+  type_chain!(post_aggregates::table.InnerJoin<person::table>.InnerJoin<community::table>.InnerJoin<post::table>),
+  Pg,
+>;
 
 impl PostView {
   pub async fn read(
@@ -252,17 +443,7 @@ impl PostView {
     me: Option<PersonId>,
     is_mod_or_admin: bool,
   ) -> Result<Self, Error> {
-    let (mut query, selection_builder) = new_query(me);
-
-    query = query.filter(post_aggregates::post_id.eq(post_id));
-
-    if !is_mod_or_admin {
-      // only show removed or deleted posts to creator
-      query = query.filter(is_creator(me).or(not_removed().and(not_deleted())));
-    }
-
-    query
-      .select(selection_builder.build())
+    build_query(pool, &QueryInput::Read {post_id, me, is_mod_or_admin}).await?
       .first(&mut *get_conn(pool).await?)
       .await
   }
@@ -316,217 +497,7 @@ pub struct PostQuery<'a> {
 
 impl<'a> PostQuery<'a> {
   pub async fn list(self, pool: &mut DbPool<'_>) -> Result<Vec<PostView>, Error> {
-    let (limit, mut offset) = limit_and_offset(self.page, self.limit)?;
-    let listing_type = self.listing_type.unwrap_or(ListingType::All);
-    let sort = self.sort.unwrap_or(SortType::Hot);
-    let local_user = self.local_user.map(|l| &l.local_user);
-
-    let me = local_user.map(|l| l.person_id);
-    let admin = local_user.map(|l| l.admin).unwrap_or(false);
-    let show_nsfw = local_user.map(|l| l.show_nsfw).unwrap_or(false);
-    let show_bot_accounts = local_user.map(|l| l.show_bot_accounts).unwrap_or(true);
-    let show_read_posts = local_user.map(|l| l.show_read_posts).unwrap_or(true);
-
-    if self.page_after.is_some() {
-      if offset != 0 {
-        return Err(Error::QueryBuilderError(
-          "legacy pagination cannot be combined with v2 pagination".into(),
-        ));
-      }
-
-      // always skip exactly one post because that's the last post of the previous page
-      // fixing the where clause is more difficult because we'd have to change only the last order-by-where clause
-      // e.g. WHERE (featured_local<=, hot_rank<=, published<=) to WHERE (<=, <=, <)
-      offset = 1;
-    }
-
-    let build_query = |page_before_or_equal: Option<PaginationCursorData>| {
-      let (mut query, mut selection_builder) = new_query(me);
-
-      let i_subscribed = || (selection_builder.subscribe)().is_not_null();
-
-      query = query
-        // hide posts from deleted communities
-        .filter(not(community::deleted))
-        // only show deleted posts to creator
-        .filter(is_creator(me).or(not(post::deleted)));
-
-      // only show removed posts to admin when viewing user profile
-      if !(self.is_profile_view && admin) {
-        query = query.filter(not_removed());
-      }
-
-      if let Some(community_id) = self.community_id {
-        query = query.filter(post_aggregates::community_id.eq(community_id));
-      }
-      if let Some(creator_id) = self.creator_id {
-        query = query.filter(post_aggregates::creator_id.eq(creator_id));
-      }
-      if let Some(url_search) = &self.url_search {
-        query = query.filter(post::url.eq(url_search));
-      }
-      if let Some(search_term) = &self.search_term {
-        let pattern = fuzzy_search(search_term);
-        let name_matches = post::name.ilike(pattern.clone());
-        let body_matches = post::body.ilike(pattern);
-        query = query.filter(name_matches.or(body_matches));
-      }
-
-      query = match listing_type {
-        ListingType::Subscribed => query.filter(i_subscribed()),
-        ListingType::Local => query.filter(community::local),
-        ListingType::All => query,
-        ListingType::ModeratorView => query.filter(is_some_and(me, |me| {
-          exists(community_moderator::table.find((me, post_aggregates::community_id)))
-        })),
-      };
-
-      // Filters that should not affect which posts can be moderated
-      if listing_type != ListingType::ModeratorView {
-        // If a user is logged in, then only show posts with a language that the user enabled.
-        if let Some(local_user) = local_user {
-          query = query.filter(exists(
-            local_user_language::table.find((local_user.id, post::language_id)),
-          ));
-        }
-
-        // Hide posts from blocked instances, communities, and persons
-        query = query
-          .filter_var_eq(&mut selection_builder.creator_blocked, false)
-          .filter(not(is_some_and(me, |me| {
-            let community_blocked =
-              exists(community_block::table.find((me, post_aggregates::community_id)));
-            let instance_blocked =
-              exists(instance_block::table.find((me, post_aggregates::instance_id)));
-            community_blocked.or(instance_blocked)
-          })));
-
-        // This filter hides hidden communities for non-subscribers. For `ListingType::Subscribed`,
-        // it is redundant and would cause a duplicated `community_follower` subquery.
-        if listing_type != ListingType::Subscribed {
-          query = query.filter(i_subscribed().or(not(community::hidden)));
-        }
-      }
-
-      if !show_nsfw {
-        query = query.filter(not(post::nsfw.or(community::nsfw)));
-      }
-      if !show_bot_accounts {
-        query = query.filter(not(person::bot_account));
-      }
-      if !(show_read_posts || self.saved_only || self.is_profile_view) {
-        query = query.filter_var_eq(&mut selection_builder.read, false);
-      }
-      if self.saved_only {
-        query = query.filter_var_eq(&mut selection_builder.saved, true);
-      }
-      if self.liked_only {
-        query = query.filter_var_eq(&mut selection_builder.my_vote, 1);
-      }
-      if self.disliked_only {
-        query = query.filter_var_eq(&mut selection_builder.my_vote, -1);
-      }
-
-      // Show featured posts first
-      let featured_sort: &dyn OrderAndPageFilter = if self.community_id.is_some() {
-        desc!(featured_community)
-      } else {
-        desc!(featured_local)
-      };
-
-      let (main_sort, top_sort_interval): (&dyn OrderAndPageFilter, Option<PgInterval>) = match sort
-      {
-        SortType::Active => (desc!(hot_rank_active), None),
-        SortType::Hot => (desc!(hot_rank), None),
-        SortType::Scaled => (desc!(scaled_rank), None),
-        SortType::Controversial => (desc!(controversy_rank), None),
-        SortType::New => (desc!(published), None),
-        SortType::Old => (asc!(published), None),
-        SortType::NewComments => (desc!(newest_comment_time), None),
-        SortType::MostComments => (desc!(comments), None),
-        SortType::TopAll => (desc!(score), None),
-        SortType::TopYear => (desc!(score), Some(1.years())),
-        SortType::TopMonth => (desc!(score), Some(1.months())),
-        SortType::TopWeek => (desc!(score), Some(1.weeks())),
-        SortType::TopDay => (desc!(score), Some(1.days())),
-        SortType::TopHour => (desc!(score), Some(1.hours())),
-        SortType::TopSixHour => (desc!(score), Some(6.hours())),
-        SortType::TopTwelveHour => (desc!(score), Some(12.hours())),
-        SortType::TopThreeMonths => (desc!(score), Some(3.months())),
-        SortType::TopSixMonths => (desc!(score), Some(6.months())),
-        SortType::TopNineMonths => (desc!(score), Some(9.months())),
-      };
-
-      let newest_sort: Option<&dyn OrderAndPageFilter> = match sort {
-        // A second time-based sort would not be very useful
-        SortType::New | SortType::Old | SortType::NewComments => None,
-        _ => Some(desc!(published)),
-      };
-
-      for i in [Some(featured_sort), Some(main_sort), newest_sort]
-        .into_iter()
-        .flatten()
-      {
-        query = i.order_and_page_filter(query, &self.page_after, &page_before_or_equal);
-      }
-
-      if let Some(interval) = top_sort_interval {
-        query = query.filter(post_aggregates::published.gt(now() - interval));
-      }
-
-      let query = query
-        .limit(limit)
-        .offset(offset)
-        .select(selection_builder.build());
-
-      debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
-
-      query
-    };
-
-    let page_before_or_equal = if listing_type == ListingType::Subscribed {
-      // first get one page for the most popular community to get an upper bound for the the page end for the real query
-      //
-      // the reason this is needed is that when fetching posts for a single community PostgreSQL can optimize
-      // the query to use an index on e.g. (=, >=, >=, >=) and fetch only LIMIT rows
-      // but for the followed-communities query it has to query the index on (IN, >=, >=, >=)
-      // which it currently can't do at all (as of PG 16). see the discussion here:
-      // https://github.com/LemmyNet/lemmy/issues/2877#issuecomment-1673597190
-      //
-      // the results are correct no matter which community we fetch these for, since it basically covers the "worst case" of the whole page consisting of posts from one community
-      // but using the largest community decreases the pagination-frame so make the real query more efficient.
-
-      let largest_subscribed: Option<CommunityId> = community_aggregates::table
-        .filter(is_some_and(me, |me| {
-          exists(community_follower::table.find((me, community_aggregates::community_id)))
-        }))
-        .order_by(community_aggregates::users_active_month.desc())
-        .select(community_aggregates::community_id)
-        .first(&mut *get_conn(pool).await?)
-        .await
-        .optional()?;
-
-      let Some(largest_subscribed) = largest_subscribed else {
-        // nothing subscribed to? no posts
-        return Ok(vec![]);
-      };
-
-      build_query(None)
-        .filter(post_aggregates::community_id.eq(largest_subscribed))
-        // If there's at least `limit` rows, then get the last row within the limit, otherwise
-        // get `None` which prevents the amount of rows returned by the final query from being
-        // incorrectly limited
-        .offset(offset + limit - 1)
-        .select(post_aggregates::all_columns)
-        .first(&mut *get_conn(pool).await?)
-        .await
-        .optional()?
-        .map(PaginationCursorData)
-    } else {
-      None
-    };
-
-    build_query(page_before_or_equal)
+    build_query(pool, &QueryInput::List(self)).await?
       .load(&mut *get_conn(pool).await?)
       .await
   }
