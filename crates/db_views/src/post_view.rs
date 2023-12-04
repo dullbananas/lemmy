@@ -135,12 +135,6 @@ enum QueryInput<'a> {
 sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::BigInt);
 
 async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Result<impl FirstOrLoad<'a, PostView>, Error> {
-  let new_query = || post_aggregates::table
-    .inner_join(person::table)
-    .inner_join(community::table)
-    .inner_join(post::table)
-    .into_boxed();
-
   let me = match input {
     QueryInput::Read{me, ..} => me,
     QueryInput::List{local_user, ..}=>local_user.person.id,
@@ -169,9 +163,12 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       .select(post_like::score.nullable())
       .single_value()
   });
-  let not_removed = not(community::removed.or(post::removed));
-  let not_deleted = not(community::deleted.or(post::deleted));
-  let is_creator = post_aggregates::creator_id.nullable().eq(me);
+  let read_comments = and_then(self.me, |me| {
+    person_post_aggregates::table
+      .find((me, post_aggregates::post_id))
+      .select(person_post_aggregates::read_comments.nullable())
+      .single_value()
+  });
   let creator_banned_from_community = exists(
     community_person_ban::table
       .find((post_aggregates::creator_id, post_aggregates::community_id)),
@@ -184,14 +181,17 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       .filter(local_user::person_id.eq(post_aggregates::creator_id))
       .filter(local_user::admin),
   );
-  let read_comments = and_then(self.me, |me| {
-    person_post_aggregates::table
-      .find((me, post_aggregates::post_id))
-      .select(person_post_aggregates::read_comments.nullable())
-      .single_value()
-  });
+  let not_removed = not(community::removed.or(post::removed));
+  let not_deleted = not(community::deleted.or(post::deleted));
+  let is_creator = post_aggregates::creator_id.nullable().eq(me);
 
-  Ok(match input {
+  let new_query = || post_aggregates::table
+    .inner_join(person::table)
+    .inner_join(community::table)
+    .inner_join(post::table)
+    .into_boxed();
+
+  let final_query = match input {
     QueryInput::Read{post_id, me, is_mod_or_admin} => {
       let mut query = new_query().filter(post_aggregates::post_id.eq(post_id));
   
@@ -229,7 +229,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       let build_inner_query = |page_before_or_equal: Option<PaginationCursorData>| {
         let mut query = new_query();
   
-        let i_subscribed = || subscribe().is_not_null();
+        let is_subscriber = || subscribe().is_not_null();
   
         query = query
           // hide posts from deleted communities
@@ -259,7 +259,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
         }
   
         query = match listing_type {
-          ListingType::Subscribed => query.filter(i_subscribed()),
+          ListingType::Subscribed => query.filter(is_subscriber()),
           ListingType::Local => query.filter(community::local),
           ListingType::All => query,
           ListingType::ModeratorView => query.filter(is_some_and(me, |me| {
@@ -290,7 +290,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           // This filter hides hidden communities for non-subscribers. For `ListingType::Subscribed`,
           // it is redundant and would cause a duplicated `community_follower` subquery.
           if listing_type != ListingType::Subscribed {
-            query = query.filter(i_subscribed().or(not(community::hidden)));
+            query = query.filter(is_subscriber().or(not(community::hidden)));
           }
         }
   
@@ -391,13 +391,8 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           .await
           .optional()?;
   
-        let Some(largest_subscribed) = largest_subscribed else {
-          // nothing subscribed to? no posts
-          return Ok(vec![]);
-        };
-  
         build_inner_query(None)
-          .filter(post_aggregates::community_id.eq(largest_subscribed))
+          .filter(post_aggregates::community_id.nullable().eq(largest_subscribed))
           // If there's at least `limit` rows, then get the last row within the limit, otherwise
           // get `None` which prevents the amount of rows returned by the final query from being
           // incorrectly limited
@@ -413,7 +408,9 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
   
       build_inner_query(page_before_or_equal)
     },
-  }.select((
+  };
+  
+  Ok(final_query.select((
       post::all_columns,
       person::all_columns,
       community::all_columns,
