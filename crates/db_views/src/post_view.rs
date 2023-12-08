@@ -64,16 +64,17 @@ enum Ord {
   Asc,
 }
 
-trait OrderAndPageFilter {
+trait PaginationCursorField {
   fn order_and_page_filter<'a>(
     &self,
     query: BoxedQuery<'a>,
+    order: Ord,
     first: &Option<PaginationCursorData>,
     last: &Option<PaginationCursorData>,
   ) -> BoxedQuery<'a>;
 }
 
-impl<C, T, F> OrderAndPageFilter for (Ord, C, F)
+impl<C, T, F> PaginationCursorField for (C, F)
 where
   for<'a> BoxedQuery<'a>: boxed_meth::ThenOrderDsl<dsl::Desc<C>>
     + boxed_meth::ThenOrderDsl<dsl::Asc<C>>
@@ -87,10 +88,11 @@ where
   fn order_and_page_filter<'a>(
     &self,
     query: BoxedQuery<'a>,
+    order: Ord,
     first: &Option<PaginationCursorData>,
     last: &Option<PaginationCursorData>,
   ) -> BoxedQuery<'a> {
-    let (order, column, getter) = *self;
+    let (column, getter) = *self;
     let (mut query, min, max) = match order {
       Ord::Desc => (query.then_order_by(column.desc()), last, first),
       Ord::Asc => (query.then_order_by(column.asc()), first, last),
@@ -105,12 +107,10 @@ where
   }
 }
 
-///
-macro_rules! desc {
+/// Returns `&dyn PaginationCursorField` for the given name
+macro_rules! field {
   ($name:ident) => {{
-    &(Ord::Desc, post_aggregates::$name, |e: &PostAggregates| {
-      e.$name
-    })
+    &(post_aggregates::$name, |e: &PostAggregates| e.$name) as &dyn PaginationCursorField
   }};
 }
 
@@ -122,7 +122,7 @@ enum QueryInput<'a> {
   },
   List {
     options: PostQuery<'a>,
-  }
+  },
 }
 
 sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::BigInt);
@@ -347,11 +347,11 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           _ => Some((Ord::Desc, field!(published))),
         };
   
-        for (ord, field) in [Some((Ord::Desc, featured_field)), Some((main_sort_ord, main_sort_field)), tie_breaker]
+        for (order, field) in [Some((Ord::Desc, featured_field)), Some((main_sort_ord, main_sort_field)), tie_breaker]
           .into_iter()
           .flatten()
         {
-          query = field.order_and_page_filter(query, ord, &options.page_after, &page_before_or_equal);
+          query = field.order_and_page_filter(query, order, &options.page_after, &page_before_or_equal);
         }
   
         if let Some(interval) = top_sort_interval {
