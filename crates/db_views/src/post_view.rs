@@ -105,17 +105,10 @@ where
   }
 }
 
+///
 macro_rules! desc {
   ($name:ident) => {{
     &(Ord::Desc, post_aggregates::$name, |e: &PostAggregates| {
-      e.$name
-    })
-  }};
-}
-
-macro_rules! asc {
-  ($name:ident) => {{
-    &(Ord::Asc, post_aggregates::$name, |e: &PostAggregates| {
       e.$name
     })
   }};
@@ -314,46 +307,51 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
         }
   
         // Show featured posts first
-        let featured_sort: &dyn OrderAndPageFilter = if options.community_id.is_some() {
-          desc!(featured_community)
+        let featured_field = if options.community_id.is_some() {
+          field!(featured_community)
         } else {
-          desc!(featured_local)
+          field!(featured_local)
         };
   
-        let (main_sort, top_sort_interval): (&dyn OrderAndPageFilter, Option<PgInterval>) = match sort
+        let (main_sort_field, top_sort_interval) = match sort
         {
-          SortType::Active => (desc!(hot_rank_active), None),
-          SortType::Hot => (desc!(hot_rank), None),
-          SortType::Scaled => (desc!(scaled_rank), None),
-          SortType::Controversial => (desc!(controversy_rank), None),
-          SortType::New => (desc!(published), None),
-          SortType::Old => (asc!(published), None),
-          SortType::NewComments => (desc!(newest_comment_time), None),
-          SortType::MostComments => (desc!(comments), None),
-          SortType::TopAll => (desc!(score), None),
-          SortType::TopYear => (desc!(score), Some(1.years())),
-          SortType::TopMonth => (desc!(score), Some(1.months())),
-          SortType::TopWeek => (desc!(score), Some(1.weeks())),
-          SortType::TopDay => (desc!(score), Some(1.days())),
-          SortType::TopHour => (desc!(score), Some(1.hours())),
-          SortType::TopSixHour => (desc!(score), Some(6.hours())),
-          SortType::TopTwelveHour => (desc!(score), Some(12.hours())),
-          SortType::TopThreeMonths => (desc!(score), Some(3.months())),
-          SortType::TopSixMonths => (desc!(score), Some(6.months())),
-          SortType::TopNineMonths => (desc!(score), Some(9.months())),
+          SortType::Active => (field!(hot_rank_active), None),
+          SortType::Hot => (field!(hot_rank), None),
+          SortType::Scaled => (field!(scaled_rank), None),
+          SortType::Controversial => (field!(controversy_rank), None),
+          SortType::New => (field!(published), None),
+          SortType::Old => (field!(published), None),
+          SortType::NewComments => (field!(newest_comment_time), None),
+          SortType::MostComments => (field!(comments), None),
+          SortType::TopAll => (field!(score), None),
+          SortType::TopYear => (field!(score), Some(1.years())),
+          SortType::TopMonth => (field!(score), Some(1.months())),
+          SortType::TopWeek => (field!(score), Some(1.weeks())),
+          SortType::TopDay => (field!(score), Some(1.days())),
+          SortType::TopHour => (field!(score), Some(1.hours())),
+          SortType::TopSixHour => (field!(score), Some(6.hours())),
+          SortType::TopTwelveHour => (field!(score), Some(12.hours())),
+          SortType::TopThreeMonths => (field!(score), Some(3.months())),
+          SortType::TopSixMonths => (field!(score), Some(6.months())),
+          SortType::TopNineMonths => (field!(score), Some(9.months())),
+        };
+
+        let main_sort_ord = match sort {
+          SortType::Old => Ord::Asc,
+          _ => Ord::Desc,
         };
   
-        let newest_sort: Option<&dyn OrderAndPageFilter> = match sort {
+        let tie_breaker = match sort {
           // A second time-based sort would not be very useful
           SortType::New | SortType::Old | SortType::NewComments => None,
-          _ => Some(desc!(published)),
+          _ => Some((Ord::Desc, field!(published))),
         };
   
-        for i in [Some(featured_sort), Some(main_sort), newest_sort]
+        for (ord, field) in [Some((Ord::Desc, featured_field)), Some((main_sort_ord, main_sort_field)), tie_breaker]
           .into_iter()
           .flatten()
         {
-          query = i.order_and_page_filter(query, &options.page_after, &page_before_or_equal);
+          query = field.order_and_page_filter(query, ord, &options.page_after, &page_before_or_equal);
         }
   
         if let Some(interval) = top_sort_interval {
