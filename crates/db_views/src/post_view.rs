@@ -485,6 +485,7 @@ impl<'a> PostQuery<'a> {
 
 #[cfg(test)]
 mod tests {
+  use chrono::Utc;
   use crate::{
     post_view::{PostQuery, PostView},
     structs::LocalUserView,
@@ -495,6 +496,7 @@ mod tests {
     newtypes::LanguageId,
     source::{
       actor_language::LocalUserLanguage,
+      comment::{Comment, CommentInsertForm},
       community::{Community, CommunityInsertForm, CommunityModerator, CommunityModeratorForm},
       community_block::{CommunityBlock, CommunityBlockForm},
       instance::Instance,
@@ -512,6 +514,7 @@ mod tests {
   };
   use lemmy_utils::error::LemmyResult;
   use serial_test::serial;
+  use std::time::Duration;
 
   const POST_BY_BLOCKED_PERSON: &str = "post by blocked person";
   const POST_BY_BOT: &str = "post by bot";
@@ -1068,6 +1071,51 @@ mod tests {
 
     Instance::delete(pool, blocked_instance.id).await?;
     cleanup(data, pool).await
+  }
+
+  #[tokio::test]
+  #[serial]
+  async fn pagination_includes_each_post_once() -> LemmyResult<()> {
+    let pool = &build_db_pool().await?;
+    let pool = &mut pool.into();
+    let data = init_data(pool).await?;
+
+    let mut expected_post_ids = vec![];
+    let mut comment_ids = vec![];
+
+    // Create 15 posts for each amount of comments from 0 to 9
+    for comments in 0..10 {
+      for _ in 0..15 {
+        let post = Post::create(pool, &PostInsertForm::builder()
+          .name("keep Christ in Christmas")
+          .creator_id(data.local_user_view.person.id)
+          .community_id(data.inserted_community.id)
+          .featured_local(Some((comments % 2) == 0))
+          .featured_community(Some((comments % 2) == 0))
+          .published(Some(Utc::now() - Duration::from_secs(comments % 3)))
+          .build()).await?;
+        expected_post_ids.push(post.id);
+        for _ in 0..comments {
+          let comment = Post::create(pool, &CommentInsertForm::builder()
+            .creator_id(data.local_user_view.person.id)
+            .post_id(post.id)
+            .content("hi")
+            .build()).await?;
+          comment_ids.push(comment.id);
+        }
+      }
+    }
+
+    let mut post_ids = PostQuery {
+      sort: Some(SortType::TopAllTime),
+      ..data.default_post_query()
+    }.list(pool).await?.into_iter().map(|p| p.post.id).collect::<Vec<_>>();
+
+    cleanup(data, pool).await?;
+
+    expected_post_ids.sort_unstable();
+    post_ids.sort_unstable();
+    assert_eq(expected_post_ids, post_ids);
   }
 
   async fn cleanup(data: Data, pool: &mut DbPool<'_>) -> LemmyResult<()> {
