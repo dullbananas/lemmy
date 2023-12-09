@@ -220,7 +220,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       }
   
       let build_inner_query = |page_before_or_equal: Option<PaginationCursorData>| {
-        let mut query = new_query();
+        let mut query = new_query().limit(limit).offset(offset);
   
         let is_subscriber = || subscribe().is_not_null();
   
@@ -306,61 +306,51 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           query = query.filter_var_eq(&mut selection_builder.my_vote, -1);
         }
   
-        // Show featured posts first
-        let featured_field = if options.community_id.is_some() {
+        let featured_first = (Ord::Desc, if options.community_id.is_some() {
           field!(featured_community)
         } else {
           field!(featured_local)
-        };
+        });
   
-        let (main_sort_field, top_sort_interval) = match sort
+        let (main_sort, top_sort_interval) = match sort
         {
-          SortType::Active => (field!(hot_rank_active), None),
-          SortType::Hot => (field!(hot_rank), None),
-          SortType::Scaled => (field!(scaled_rank), None),
-          SortType::Controversial => (field!(controversy_rank), None),
-          SortType::New => (field!(published), None),
-          SortType::Old => (field!(published), None),
-          SortType::NewComments => (field!(newest_comment_time), None),
-          SortType::MostComments => (field!(comments), None),
-          SortType::TopAll => (field!(score), None),
-          SortType::TopYear => (field!(score), Some(1.years())),
-          SortType::TopMonth => (field!(score), Some(1.months())),
-          SortType::TopWeek => (field!(score), Some(1.weeks())),
-          SortType::TopDay => (field!(score), Some(1.days())),
-          SortType::TopHour => (field!(score), Some(1.hours())),
-          SortType::TopSixHour => (field!(score), Some(6.hours())),
-          SortType::TopTwelveHour => (field!(score), Some(12.hours())),
-          SortType::TopThreeMonths => (field!(score), Some(3.months())),
-          SortType::TopSixMonths => (field!(score), Some(6.months())),
-          SortType::TopNineMonths => (field!(score), Some(9.months())),
-        };
-
-        let main_sort_ord = match sort {
-          SortType::Old => Ord::Asc,
-          _ => Ord::Desc,
+          SortType::Active => ((Ord::Desc, field!(hot_rank_active)), None),
+          SortType::Hot => ((Ord::Desc, field!(hot_rank)), None),
+          SortType::Scaled => ((Ord::Desc, field!(scaled_rank)), None),
+          SortType::Controversial => ((Ord::Desc, field!(controversy_rank)), None),
+          SortType::New => ((Ord::Desc, field!(published)), None),
+          SortType::Old => ((Ord::Asc, field!(published)), None),
+          SortType::NewComments => ((Ord::Desc, field!(newest_comment_time)), None),
+          SortType::MostComments => ((Ord::Desc, field!(comments)), None),
+          SortType::TopAll => ((Ord::Desc, field!(score)), None),
+          SortType::TopYear => ((Ord::Desc, field!(score)), Some(1.years())),
+          SortType::TopMonth => ((Ord::Desc, field!(score)), Some(1.months())),
+          SortType::TopWeek => ((Ord::Desc, field!(score)), Some(1.weeks())),
+          SortType::TopDay => ((Ord::Desc, field!(score)), Some(1.days())),
+          SortType::TopHour => ((Ord::Desc, field!(score)), Some(1.hours())),
+          SortType::TopSixHour => ((Ord::Desc, field!(score)), Some(6.hours())),
+          SortType::TopTwelveHour => ((Ord::Desc, field!(score)), Some(12.hours())),
+          SortType::TopThreeMonths => ((Ord::Desc, field!(score)), Some(3.months())),
+          SortType::TopSixMonths => ((Ord::Desc, field!(score)), Some(6.months())),
+          SortType::TopNineMonths => ((Ord::Desc, field!(score)), Some(9.months())),
         };
   
+        if let Some(interval) = top_sort_interval {
+          query = query.filter(post_aggregates::published.gt(now() - interval));
+        }
+
         let tie_breaker = match sort {
           // A second time-based sort would not be very useful
           SortType::New | SortType::Old | SortType::NewComments => None,
           _ => Some((Ord::Desc, field!(published))),
         };
   
-        for (order, field) in [Some((Ord::Desc, featured_field)), Some((main_sort_ord, main_sort_field)), tie_breaker]
+        for (order, field) in [Some(featured_first), Some(main_sort), tie_breaker]
           .into_iter()
           .flatten()
         {
           query = field.order_and_page_filter(query, order, &options.page_after, &page_before_or_equal);
         }
-  
-        if let Some(interval) = top_sort_interval {
-          query = query.filter(post_aggregates::published.gt(now() - interval));
-        }
-  
-        query = query
-          .limit(limit)
-          .offset(offset);
   
         debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
   
