@@ -209,19 +209,16 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       let show_bot_accounts = local_user.map(|l| l.show_bot_accounts).unwrap_or(true);
       let show_read_posts = local_user.map(|l| l.show_read_posts).unwrap_or(true);
   
-      let (limit, mut offset) = limit_and_offset(options.page, options.limit)?;
-      if options.page_after.is_some() {
-        if offset != 0 {
-          return Err(Error::QueryBuilderError(
-            "legacy pagination cannot be combined with v2 pagination".into(),
-          ));
-        }
-  
+      let (limit, page_number_offset) = limit_and_offset(options.page, options.limit)?;
+      let previous_page_exclusion_offset = if options.page_after.is_some() {
         // always skip exactly one post because that's the last post of the previous page
         // fixing the where clause is more difficult because we'd have to change only the last order-by-where clause
         // e.g. WHERE (featured_local<=, hot_rank<=, published<=) to WHERE (<=, <=, <)
-        offset = 1;
-      }
+        1
+      } else {
+        0
+      };
+      let offset = page_number_offset + previous_page_exclusion_offset;
   
       let build_inner_query = |page_before_or_equal: Option<PaginationCursorData>| {
         let mut query = new_query().limit(limit).offset(offset);
@@ -353,7 +350,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           .into_iter()
           .flatten()
         {
-          query = field.order_and_page_filter(query, order, &options);
+          query = field.order_and_page_filter(query, order, &options.page_after, &page_before_or_equal);
         }
   
         debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
