@@ -42,6 +42,7 @@ use lemmy_db_schema::{
   utils::{
     and_then,
     boxed_meth,
+    functions::coalesce,
     fuzzy_search,
     get_conn,
     is_some_and,
@@ -128,8 +129,6 @@ enum QueryInput<'a> {
     options: PostQuery<'a>,
   },
 }
-
-sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::BigInt);
 
 async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Result<impl FirstOrLoad<'a, PostView>, Error> {
   let me = match input {
