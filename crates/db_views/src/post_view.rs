@@ -69,8 +69,7 @@ trait PaginationCursorField {
     &self,
     query: BoxedQuery<'a>,
     order: Ord,
-    first: &Option<PaginationCursorData>,
-    last: &Option<PaginationCursorData>,
+    options: &PostQuery<'_>,
   ) -> BoxedQuery<'a>;
 }
 
@@ -89,18 +88,17 @@ where
     &self,
     query: BoxedQuery<'a>,
     order: Ord,
-    first: &Option<PaginationCursorData>,
-    last: &Option<PaginationCursorData>,
+    options: &PostQuery<'_>,
   ) -> BoxedQuery<'a> {
     let (column, getter) = *self;
     let (mut query, min, max) = match order {
       Ord::Desc => (query.then_order_by(column.desc()), last, first),
       Ord::Asc => (query.then_order_by(column.asc()), first, last),
     };
-    if let Some(min) = min {
+    if let Some(min) = &options.page_after {
       query = query.filter(column.ge(getter(&min.0)));
     }
-    if let Some(max) = max {
+    if let Some(max) = &options.page_before_or_equal {
       query = query.filter(column.le(getter(&max.0)));
     }
     query
@@ -349,7 +347,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           .into_iter()
           .flatten()
         {
-          query = field.order_and_page_filter(query, order, &options.page_after, &page_before_or_equal);
+          query = field.order_and_page_filter(query, order, &options);
         }
   
         debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
