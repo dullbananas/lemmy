@@ -64,18 +64,19 @@ enum Ord {
   Asc,
 }
 
-trait PaginationCursorField {
-  fn order_and_page_filter<'a>(
+trait PaginationCursorField<Q> {
+  fn order_and_page_filter(
     &self,
-    query: BoxedQuery<'a>,
+    query: Q,
     order: Ord,
-    options: &PostQuery<'_>,
-  ) -> BoxedQuery<'a>;
+    first: &Option<PaginationCursorData>,
+    last: &Option<PaginationCursorData>,
+  ) -> Q;
 }
 
-impl<C, T, F> PaginationCursorField for (C, F)
+impl<Q, C, T, F> PaginationCursorField<Q> for (C, F)
 where
-  for<'a> BoxedQuery<'a>: boxed_meth::ThenOrderDsl<dsl::Desc<C>>
+  Q: boxed_meth::ThenOrderDsl<dsl::Desc<C>>
     + boxed_meth::ThenOrderDsl<dsl::Asc<C>>
     + boxed_meth::FilterDsl<dsl::LtEq<C, T>>
     + boxed_meth::FilterDsl<dsl::GtEq<C, T>>,
@@ -84,31 +85,36 @@ where
   T: AsExpression<C::SqlType>,
   F: Fn(&PostAggregates) -> T + Copy,
 {
-  fn order_and_page_filter<'a>(
+  fn order_and_page_filter(
     &self,
-    query: BoxedQuery<'a>,
+    mut query: Q,
     order: Ord,
-    options: &PostQuery<'_>,
-  ) -> BoxedQuery<'a> {
+    first: &Option<PaginationCursorData>,
+    last: &Option<PaginationCursorData>,
+  ) -> Q {
     let (column, getter) = *self;
-    let (mut query, min, max) = match order {
+    let min;
+    let max;
+    (query, min, max) = match order {
       Ord::Desc => (query.then_order_by(column.desc()), last, first),
       Ord::Asc => (query.then_order_by(column.asc()), first, last),
     };
-    if let Some(min) = &options.page_after {
+    if let Some(min) = min {
       query = query.filter(column.ge(getter(&min.0)));
     }
-    if let Some(max) = &options.page_before_or_equal {
+    if let Some(max) = max {
       query = query.filter(column.le(getter(&max.0)));
     }
     query
   }
 }
 
-/// Returns `&dyn PaginationCursorField` for the given name
+/// Returns `&dyn PaginationCursorField<_>` for the given name
 macro_rules! field {
   ($name:ident) => {{
-    &(post_aggregates::$name, |e: &PostAggregates| e.$name) as &dyn PaginationCursorField
+    let column = post_aggregates::$name;
+    let getter = |e: &PostAggregates| e.$name;
+    &(column, getter) as &dyn PaginationCursorField<_>
   }};
 }
 
@@ -128,7 +134,7 @@ sql_function!(fn coalesce(x: st::Nullable<st::BigInt>, y: st::BigInt) -> st::Big
 async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Result<impl FirstOrLoad<'a, PostView>, Error> {
   let me = match input {
     QueryInput::Read{me, ..} => me,
-    QueryInput::List{local_user, ..}=>local_user.person.id,
+    QueryInput::List{options}=>options.local_user.map(|l| l.person.id),
   };
 
   let mut subscribe = move || {
@@ -172,8 +178,8 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       .filter(local_user::person_id.eq(post_aggregates::creator_id))
       .filter(local_user::admin),
   );
-  let not_removed = not(community::removed.or(post::removed));
-  let not_deleted = not(community::deleted.or(post::deleted));
+  let removed = community::removed.or(post::removed);
+  let deleted = community::deleted.or(post::deleted);
   let is_creator = post_aggregates::creator_id.nullable().eq(me);
 
   let new_query = || post_aggregates::table
@@ -186,15 +192,14 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
     QueryInput::Read{post_id, me, is_mod_or_admin} => {
       let mut query = new_query().filter(post_aggregates::post_id.eq(post_id));
   
+      // only show removed or deleted posts to creator, mods, and admins
       if !is_mod_or_admin {
-        // only show removed or deleted posts to creator
-        query = query.filter(is_creator.or(not_removed.and(not_deleted)));
+        query = query.filter(is_creator.or(not(removed.or(deleted))));
       }
 
       query
     },
     QueryInput::List{options} => {
-      let (limit, mut offset) = limit_and_offset(options.page, options.limit)?;
       let listing_type = options.listing_type.unwrap_or(ListingType::All);
       let sort = options.sort.unwrap_or(SortType::Hot);
       let local_user = options.local_user.map(|l| &l.local_user);
@@ -204,6 +209,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       let show_bot_accounts = local_user.map(|l| l.show_bot_accounts).unwrap_or(true);
       let show_read_posts = local_user.map(|l| l.show_read_posts).unwrap_or(true);
   
+      let (limit, mut offset) = limit_and_offset(options.page, options.limit)?;
       if options.page_after.is_some() {
         if offset != 0 {
           return Err(Error::QueryBuilderError(
@@ -226,11 +232,11 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
           // hide posts from deleted communities
           .filter(not(community::deleted))
           // only show deleted posts to creator
-          .filter(is_creator(me).or(not(post::deleted)));
+          .filter(is_creator.or(not(post::deleted)));
   
         // only show removed posts to admin when viewing user profile
         if !(options.is_profile_view && admin) {
-          query = query.filter(not_removed());
+          query = query.filter(not(removed));
         }
   
         if let Some(community_id) = options.community_id {
@@ -269,7 +275,7 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
   
           // Hide posts from blocked instances, communities, and persons
           query = query
-            .filter_var_eq(&mut selection_builder.creator_blocked, false)
+            .filter_var_eq(&mut creator_blocked, false)
             .filter(not(is_some_and(me, |me| {
               let community_blocked =
                 exists(community_block::table.find((me, post_aggregates::community_id)));
@@ -379,9 +385,9 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
   
         build_inner_query(None)
           .filter(post_aggregates::community_id.nullable().eq(largest_subscribed))
-          // If there's at least `limit` rows, then get the last row within the limit, otherwise
-          // get `None` which prevents the amount of rows returned by the final query from being
-          // incorrectly limited
+          // If there's at least `limit` rows, then get the last row within the limit. Otherwise,
+          // get `None`, which prevents the amount of rows returned by the final query from being
+          // incorrectly limited.
           .offset(offset + limit - 1)
           .select(post_aggregates::all_columns)
           .first(&mut *get_conn(pool).await?)
@@ -412,12 +418,6 @@ async fn build_query<'a>(pool: &mut DbPool<'_>, input: &'a QueryInput<'_>) -> Re
       post_aggregates::comments - coalesce(read_comments, 0),
   )))
 }
-
-type BoxedQuery<'a> = dsl::IntoBoxed<
-  'a,
-  type_chain!(post_aggregates::table.InnerJoin<person::table>.InnerJoin<community::table>.InnerJoin<post::table>),
-  Pg,
->;
 
 impl PostView {
   pub async fn read(
