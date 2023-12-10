@@ -66,6 +66,7 @@ struct PaginationCursorField<Q, QS> {
   then_order_by_asc: fn(Q) -> Q,
   le: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
   ge: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
+  eq: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
 }
 
 /// Returns `PaginationCursorField<_, _>` for the given name
@@ -76,6 +77,7 @@ macro_rules! field {
       then_order_by_asc: |query| query.then_order_by(post_aggregates::$name.asc()),
       le: |e| Box::new(post_aggregates::$name.le(e.$name),
       ge: |e| Box::new(post_aggregates::$name.ge(e.$name),
+      eq: |e| Box::new(post_aggregates::$name.eq(e.$name),
     }
   };
 }
@@ -321,6 +323,8 @@ async fn build_query<'a>(
           _ => Some((Ord::Desc, field!(published))),
         };
 
+        let mut previous_fields_eq: Box<dyn Fn() -> BoxExpr<_, sql_types::Bool>> = Box::new(|| Box::new(false.into_sql::<sql_types::Bool>()));
+
         for (order, field) in [
           Some((Ord::Desc, featured_field)),
           Some(main_sort),
@@ -340,7 +344,18 @@ async fn build_query<'a>(
           if let Some(max) = max {
             query = query.filter((field.le)(&max.0));
           }
-          query
+          match order {
+            Ord::Desc => {
+              query = (field.then_order_by_desc)(query);//TODOOOOO
+              if let Some(cursor) = &options.page_after {
+                query = query.filter((field.le)(&cursor.0));
+              }
+              if let Some(cursor) = &page_before_or_equal {
+                query = query.filter((field.le)(&cursor.0));
+              }
+            }
+            Ord::Asc => {}
+          }
         }
 
         debug!("Post View Query: {:?}", debug_query::<Pg, _>(&query));
