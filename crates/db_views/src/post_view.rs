@@ -66,7 +66,7 @@ struct PaginationCursorField<Q, QS> {
   then_order_by_asc: fn(Q) -> Q,
   le: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
   ge: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
-  eq: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
+  ne: fn(&PostAggregates) -> BoxExpr<QS, sql_types::Bool>,
 }
 
 /// Returns `PaginationCursorField<_, _>` for the given name
@@ -77,7 +77,7 @@ macro_rules! field {
       then_order_by_asc: |query| query.then_order_by(post_aggregates::$name.asc()),
       le: |e| Box::new(post_aggregates::$name.le(e.$name),
       ge: |e| Box::new(post_aggregates::$name.ge(e.$name),
-      eq: |e| Box::new(post_aggregates::$name.eq(e.$name),
+      ne: |e| Box::new(post_aggregates::$name.ne(e.$name),
     }
   };
 }
@@ -323,7 +323,11 @@ async fn build_query<'a>(
           _ => Some((Ord::Desc, field!(published))),
         };
 
-        let mut previous_fields_eq: Box<dyn Fn() -> BoxExpr<_, sql_types::Bool>> = Box::new(|| Box::new(false.into_sql::<sql_types::Bool>()));
+        let false_sql = || -> BoxExpr<_, sql_types::Bool> {
+          Box::new(false.into_sql::<sql_types::Bool>())
+        };
+        let mut previous_fields_ne_first: Box<dyn Fn() -> _> = Box::new(false_sql);
+        let mut previous_fields_ne_last: Box<dyn Fn() -> _> = Box::new(false_sql);
 
         for (order, field) in [
           Some((Ord::Desc, featured_field)),
@@ -333,28 +337,18 @@ async fn build_query<'a>(
         .into_iter()
         .flatten()
         {
-          let (then_order_by_field, min, max) = match order {
-            Ord::Desc => (field.then_order_by_desc, &page_before_or_equal, &options.page_after),
-            Ord::Asc => (field.then_order_by_asc, &options.page_after, &page_before_or_equal),
+          let (then_order_by_field, compare_first, compare_last) = match order {
+            Ord::Desc => (field.then_order_by_desc, field.le, field.ge),
+            Ord::Asc => (field.then_order_by_asc, field.ge, field.le),
           };
           query = then_order_by_field(query);
-          if let Some(min) = min {
-            query = query.filter((field.ge)(&min.0));
+          if let Some(first) = &options.page_after {
+            query = query.filter(compare_first(&first.0).or(previous_fields_ne_first()));
+            previous_fields_ne_first = Box::new(|| previous_fields_ne_first().or((field.ne)(&first.0)));
           }
-          if let Some(max) = max {
-            query = query.filter((field.le)(&max.0));
-          }
-          match order {
-            Ord::Desc => {
-              query = (field.then_order_by_desc)(query);//TODOOOOO
-              if let Some(cursor) = &options.page_after {
-                query = query.filter((field.le)(&cursor.0));
-              }
-              if let Some(cursor) = &page_before_or_equal {
-                query = query.filter((field.le)(&cursor.0));
-              }
-            }
-            Ord::Asc => {}
+          if let Some(last) = &page_before_or_equal {
+            query = query.filter(compare_last(&last.0).or(previous_fields_ne_last()));
+            previous_fields_ne_last = Box::new(|| previous_fields_ne_last().or((field.ne)(&last.0)));
           }
         }
 
