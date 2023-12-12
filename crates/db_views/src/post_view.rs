@@ -795,14 +795,14 @@ mod tests {
     };
     CommunityBlock::block(pool, &community_block).await?;
 
-    let post_list_after_block = PostQuery {
+    let read_post_listings_with_person_after_block = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
     // Should be 0 posts after the community block
-    assert_eq!(post_list_after_block, vec![]);
+    assert_eq!(read_post_listings_with_person_after_block, vec![]);
 
     CommunityBlock::unblock(pool, &community_block).await?;
     cleanup(data, pool).await
@@ -815,15 +815,13 @@ mod tests {
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
-    let inserted_post_like = PostLike::like(
-      pool,
-      &PostLikeForm {
-        post_id: data.inserted_post.id,
-        person_id: data.local_user_view.person.id,
-        score: 1,
-      },
-    )
-    .await?;
+    let post_like_form = PostLikeForm {
+      post_id: data.inserted_post.id,
+      person_id: data.local_user_view.person.id,
+      score: 1,
+    };
+
+    let inserted_post_like = PostLike::like(pool, &post_like_form).await?;
 
     let expected_post_like = PostLike {
       post_id: data.inserted_post.id,
@@ -833,7 +831,7 @@ mod tests {
     };
     assert_eq!(expected_post_like, inserted_post_like);
 
-    let post = PostView::read(
+    let post_listing_single_with_person = PostView::read(
       pool,
       data.inserted_post.id,
       Some(data.local_user_view.person.id),
@@ -845,43 +843,44 @@ mod tests {
     expected_post_with_upvote.my_vote = Some(1);
     expected_post_with_upvote.counts.score = 1;
     expected_post_with_upvote.counts.upvotes = 1;
-    assert_eq!(expected_post_with_upvote, post);
+    assert_eq!(expected_post_with_upvote, post_listing_single_with_person);
 
-    data.local_user_view.local_user = LocalUser::update(
+    let local_user_form = LocalUserUpdateForm {
+      show_bot_accounts: Some(false),
+      ..Default::default()
+    };
+    let innserted_local_user = LocalUser::update(
       pool,
       data.local_user_view.local_user.id,
-      &LocalUserUpdateForm {
-        show_bot_accounts: Some(false),
-        ..Default::default()
-      },
-    )
-    .await?;
+      &local_user_form,
+    ).await?;
+    data.local_user_view.local_user = inserted_local_user;
 
-    let post_list = PostQuery {
+    let read_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(vec![expected_post_with_upvote], post_list);
+    assert_eq!(vec![expected_post_with_upvote], read_post_listing);
 
-    let liked_post_list = PostQuery {
+    let read_liked_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
       liked_only: true,
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(post_list, liked_post_list);
+    assert_eq!(post_list, read_liked_post_listing);
 
-    let disliked_post_list = PostQuery {
+    let read_disliked_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
       disliked_only: true,
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(disliked_post_list, vec![]);
+    assert_eq!(read_disliked_post_listing, vec![]);
 
     let like_removed =
       PostLike::remove(pool, data.local_user_view.person.id, data.inserted_post.id).await?;
