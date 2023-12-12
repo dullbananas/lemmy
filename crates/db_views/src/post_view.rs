@@ -896,16 +896,15 @@ mod tests {
     let data = init_data(pool).await?;
 
     // Make one of the inserted persons a moderator
-    CommunityModerator::join(
-      pool,
-      &CommunityModeratorForm {
-        community_id: data.inserted_community.id,
-        person_id: data.local_user_view.person.id,
-      },
-    )
-    .await?;
+    let person_id = data.local_user_view.person.id;
+    let community_id = data.inserted_community.id;
+    let form = CommunityModeratorForm {
+      community_id,
+      person_id,
+    };
+    CommunityModerator::join(pool, &form).await.unwrap();
 
-    let post_list = PostQuery {
+    let post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
@@ -915,12 +914,12 @@ mod tests {
     .map(|p| (p.creator.name, p.creator_is_moderator, p.creator_is_admin))
     .collect::<Vec<_>>();
 
-    let expected_post_list = vec![
+    let expected_post_listing = vec![
       ("mybot".to_owned(), false, false),
       ("tegan".to_owned(), true, true),
     ];
 
-    assert_eq!(expected_post_list, post_list);
+    assert_eq!(expected_post_listing, post_listing);
 
     cleanup(data, pool).await
   }
@@ -951,20 +950,20 @@ mod tests {
 
     Post::create(pool, &post_spanish).await?;
 
-    let post_list = data.default_post_query().list(pool).await?;
+    let post_listings_all = data.default_post_query().list(pool).await?;
 
     // no language filters specified, all posts should be returned
-    assert_eq!(vec![EL_POSTO, POST_BY_BOT, POST], names(&post_list));
+    assert_eq!(vec![EL_POSTO, POST_BY_BOT, POST], names(&post_listings_all));
 
     LocalUserLanguage::update(pool, vec![french_id], data.local_user_view.local_user.id).await?;
 
-    let french_post_list = data.default_post_query().list(pool).await?;
+    let post_listing_french = data.default_post_query().list(pool).await?;
 
     // only one post in french and one undetermined should be returned
-    assert_eq!(vec![POST_BY_BOT, POST], names(&french_post_list));
+    assert_eq!(vec![POST_BY_BOT, POST], names(&post_list_french));
     assert_eq!(
       Some(french_id),
-      french_post_list.get(1).map(|p| p.post.language_id)
+      post_listing_french.get(1).map(|p| p.post.language_id)
     );
 
     LocalUserLanguage::update(
@@ -973,20 +972,20 @@ mod tests {
       data.local_user_view.local_user.id,
     )
     .await?;
-    let french_und_post_list = data
+    let post_listings_french_und = data
       .default_post_query()
       .list(pool)
       .await?
       .into_iter()
       .map(|p| (p.post.name, p.post.language_id))
       .collect::<Vec<_>>();
-    let expected_french_und_post_list = vec![
+    let expected_post_listings_french_und = vec![
       (POST_BY_BOT.to_owned(), UNDETERMINED_ID),
       (POST.to_owned(), french_id),
     ];
 
     // french post and undetermined language post should be returned
-    assert_eq!(expected_french_und_post_list, french_und_post_list);
+    assert_eq!(expected_post_listings_french_und, post_listings_french_und);
 
     cleanup(data, pool).await
   }
@@ -1010,18 +1009,18 @@ mod tests {
     .await?;
 
     // Make sure you don't see the removed post in the results
-    let post_list = data.default_post_query().list(pool).await?;
-    assert_eq!(vec![POST_BY_BOT], names(&post_list));
+    let post_listings_no_admin = data.default_post_query().list(pool).await?;
+    assert_eq!(vec![POST_BY_BOT], names(&post_listings_no_admin));
 
     // Removed bot post is shown to admins on its profile page
     data.local_user_view.local_user.admin = true;
-    let post_list_on_profile_page = PostQuery {
+    let post_listings_is_admin = PostQuery {
       creator_id: Some(data.inserted_bot.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
-    assert_eq!(vec![POST_BY_BOT], names(&post_list_on_profile_page));
+    assert_eq!(vec![POST_BY_BOT], names(&post_listins_is_admin));
 
     cleanup(data, pool).await
   }
@@ -1075,33 +1074,28 @@ mod tests {
 
     let blocked_instance = Instance::read_or_create(pool, "another_domain.tld".to_string()).await?;
 
-    let inserted_community = Community::create(
-      pool,
-      &CommunityInsertForm::builder()
-        .name("test_community_4".to_string())
-        .title("none".to_owned())
-        .public_key("pubkey".to_string())
-        .instance_id(blocked_instance.id)
-        .build(),
-    )
-    .await?;
+    let community_form = CommunityInsertForm::builder()
+      .name("test_community_4".to_string())
+      .title("none".to_owned())
+      .public_key("pubkey".to_string())
+      .instance_id(blocked_instance.id)
+      .build();
+    let inserted_community = Community::create(pool, &community_form).await?;
 
-    let post_from_blocked_instance = Post::create(
-      pool,
-      &PostInsertForm::builder()
-        .name(POST_FROM_BLOCKED_INSTANCE.to_string())
-        .creator_id(data.inserted_bot.id)
-        .community_id(inserted_community.id)
-        .language_id(Some(LanguageId(1)))
-        .build(),
-    )
-    .await?;
+    let post_form = PostInsertForm::builder()
+      .name(POST_FROM_BLOCKED_INSTANCE.to_string())
+      .creator_id(data.inserted_bot.id)
+      .community_id(inserted_community.id)
+      .language_id(Some(LanguageId(1)))
+      .build();
+
+    let post_from_blocked_instance = Post::create(pool, &post_form).await?;
 
     // no instance block, should return all posts
-    let post_list = data.default_post_query().list(pool).await?;
+    let post_listings_all = data.default_post_query().list(pool).await?;
     assert_eq!(
       vec![POST_FROM_BLOCKED_INSTANCE, POST_BY_BOT, POST],
-      names(&post_list)
+      names(&post_listings_all)
     );
 
     // block the instance
@@ -1112,18 +1106,18 @@ mod tests {
     InstanceBlock::block(pool, &block_form).await?;
 
     // now posts from communities on that instance should be hidden
-    let post_list_with_block = data.default_post_query().list(pool).await?;
-    assert_eq!(vec![POST_BY_BOT, POST], names(&post_list_with_block));
-    assert!(post_list_with_block
+    let post_listings_blocked = data.default_post_query().list(pool).await?;
+    assert_eq!(vec![POST_BY_BOT, POST], names(&post_listings_blocked));
+    assert!(post_listings_blocked
       .iter()
       .all(|p| p.post.id != post_from_blocked_instance.id));
 
     // after unblocking it should return all posts again
     InstanceBlock::unblock(pool, &block_form).await?;
-    let post_list_with_removed_block = data.default_post_query().list(pool).await?;
+    let post_listings_blocked = data.default_post_query().list(pool).await?;
     assert_eq!(
       vec![POST_FROM_BLOCKED_INSTANCE, POST_BY_BOT, POST],
-      names(&post_list_with_removed_block)
+      names(&post_listings_blocked)
     );
 
     Instance::delete(pool, blocked_instance.id).await?;
