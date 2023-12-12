@@ -696,24 +696,25 @@ mod tests {
     let pool = &mut pool.into();
     let mut data = init_data(pool).await?;
 
-    data.local_user_view.local_user = LocalUser::update(
+    let local_user_form = LocalUserUpdateForm {
+      show_bot_accounts: Some(false),
+      ..Default::default()
+    };
+    let innserted_local_user = LocalUser::update(
       pool,
       data.local_user_view.local_user.id,
-      &LocalUserUpdateForm {
-        show_bot_accounts: Some(false),
-        ..Default::default()
-      },
-    )
-    .await?;
+      &local_user_form,
+    ).await?;
+    data.local_user_view.local_user = inserted_local_user;
 
-    let post_list_without_bots = PostQuery {
+    let read_post_listing = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
 
-    let post = PostView::read(
+    let post_listing_single_with_person = PostView::read(
       pool,
       data.inserted_post.id,
       Some(data.local_user_view.person.id),
@@ -721,30 +722,31 @@ mod tests {
     )
     .await?;
 
-    let expected_post = expected_post_view(&data, pool).await?;
+    let expected_post_listing_with_user = expected_post_view(&data, pool).await?;
 
     // Should be only one person, IE the bot post, and blocked should be missing
-    assert_eq!(vec![post.clone()], post_list_without_bots);
-    assert_eq!(expected_post, post);
+    assert_eq!(vec![post_listing_single_with_person.clone()], read_post_listing);
+    assert_eq!(expected_post_listing_with_user, post_listing_single_with_person);
 
-    data.local_user_view.local_user = LocalUser::update(
+    let local_user_form = LocalUserUpdateForm {
+      show_bot_accounts: Some(false),
+      ..Default::default()
+    };
+    let innserted_local_user = LocalUser::update(
       pool,
       data.local_user_view.local_user.id,
-      &LocalUserUpdateForm {
-        show_bot_accounts: Some(true),
-        ..Default::default()
-      },
-    )
-    .await?;
+      &local_user_form,
+    ).await?;
+    data.local_user_view.local_user = inserted_local_user;
 
-    let post_list_with_bots = PostQuery {
+    let post_listings_with_bots = PostQuery {
       community_id: Some(data.inserted_community.id),
       ..data.default_post_query()
     }
     .list(pool)
     .await?;
     // should include bot post which has "undetermined" language
-    assert_eq!(vec![POST_BY_BOT, POST], names(&post_list_with_bots));
+    assert_eq!(vec![POST_BY_BOT, POST], names(&post_listings_with_bots));
 
     cleanup(data, pool).await
   }
