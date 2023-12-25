@@ -73,6 +73,8 @@ BEGIN
                 FROM (SELECT DISTINCT %1$s_id FROM new_removal WHERE new_removal.removed) AS distinct_removal
                 WHERE
                     report.%1$s_id = distinct_removal.%1$s_id
+                    AND NOT report.resolved
+                    AND COALESCE(report.updated < now(), TRUE)
                 RETURN NULL;
             END $$;
     CREATE TRIGGER resolve_reports
