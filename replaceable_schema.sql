@@ -20,6 +20,9 @@ CREATE SCHEMA r;
 -- Rank calculations
 CREATE OR REPLACE FUNCTION r.controversy_rank (upvotes numeric, downvotes numeric)
     RETURNS float
+    LANGUAGE plpgsql
+    IMMUTABLE
+    PARALLEL SAFE
     AS $$
 BEGIN
     IF downvotes <= 0 OR upvotes <= 0 THEN
@@ -32,14 +35,13 @@ BEGIN
         END;
     END IF;
 END;
-$$
-LANGUAGE plpgsql
-IMMUTABLE;
+$$;
 
 -- Selects both old and new rows in a trigger and allows using `sum(count_diff)` to get the number to add to a count
 CREATE FUNCTION r.combine_transition_tables ()
     RETURNS SETOF record
     LANGUAGE sql
+    PARALLEL RESTRICTED
     AS $$
     SELECT
         -1 AS count_diff,
