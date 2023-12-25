@@ -70,10 +70,9 @@ BEGIN
                     %1$s_report AS report
                 SET
                     resolved = TRUE, resolver_id = mod_person_id, updated = now()
-                FROM new_removal
+                FROM (SELECT DISTINCT %1$s_id FROM new_removal WHERE new_removal.removed) AS distinct_removal
                 WHERE
-                    report.%1$s_id = new_removal.%1$s_id
-                    AND new_removal.removed;
+                    report.%1$s_id = distinct_removal.%1$s_id
                 RETURN NULL;
             END $$;
     CREATE TRIGGER resolve_reports
