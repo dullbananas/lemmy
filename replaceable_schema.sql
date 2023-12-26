@@ -216,34 +216,55 @@ CREATE FUNCTION r.parent_aggregates_from_comment ()
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    WITH
-        comment_group AS (
-            SELECT
-                post_id,
+    WITH comment_group AS (
+        SELECT
+            post_id,
+            creator_id,
+            local,
+            sum(count_diff) AS comments,
+        FROM
+            combine_transition_tables ()
+        WHERE
+            NOT (deleted
+                OR removed)
+        GROUP BY
+            GROUPING SETS (post_id,
                 creator_id,
-                local,
-                sum(count_diff) AS comments,
-            FROM
-                combine_transition_tables ()
-            WHERE
-                NOT (deleted OR removed)
-            GROUP BY
-                GROUPING SETS (post_id, creator_id, local)),
-        post_diff AS (
-            UPDATE
-                post_aggregates AS a
-            SET
-                comments = a.comments + comment_group.comments,
-                newest_comment_time = GREATEST (a.newest_comment_time, (SELECT max(published) FROM new_table WHERE a.post_id = new_table.post_id))
-                newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, (SELECT max(published) FROM new_table WHERE a.post_id = new_table.post_id AND .creator_id != p.creator_id
-            AND pa.published > ('now'::timestamp - '2 days'::interval)))
-            FROM
-                comment_group
-            WHERE
-                a.post_id = comment_group.post_id
-            RETURNING
-                a.community_id,
-                diff.comments)
+                local)
+),
+post_diff AS (
+    UPDATE
+        post_aggregates AS a
+    SET
+        comments = a.comments + comment_group.comments,
+        newest_comment_time = GREATEST (a.newest_comment_time, (
+                SELECT
+                    max(published)
+                FROM new_table AS new_comment
+                WHERE
+                    a.post_id = new_comment.post_id)
+                LIMIT 1),
+        newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, (
+                SELECT
+                    max(published)
+                FROM new_table AS new_comment
+                WHERE
+                    a.post_id = new_comment.post_id
+                    -- Ignore comments from the post's creator
+                    AND a.creator_id != new_comment.creator_id
+                    -- Ignore comments on old posts
+                    AND a.published > (new_comment.published - '2 days'::interval)
+                LIMIT 1))
+    FROM
+        comment_group
+    WHERE
+        a.post_id = comment_group.post_id
+    RETURNING
+        a.community_id,
+        diff.comments
+)
+SELECT
+    1;
     RETURN NULL;
 END
 $$;
