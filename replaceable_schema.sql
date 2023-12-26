@@ -21,8 +21,7 @@ CREATE SCHEMA r;
 CREATE FUNCTION r.controversy_rank (upvotes numeric, downvotes numeric)
     RETURNS float
     LANGUAGE plpgsql
-    IMMUTABLE
-    PARALLEL SAFE
+    IMMUTABLE PARALLEL SAFE
     AS $$
 BEGIN
     IF downvotes <= 0 OR upvotes <= 0 THEN
@@ -59,11 +58,19 @@ $$;
 -- Define triggers for both posts and comments
 CREATE FUNCTION r.creator_id_from_post_aggregates (agg post_aggregates)
     RETURNS int
-    SELECT creator_id FROM agg;
+    SELECT
+        creator_id
+    FROM
+        agg;
 
 CREATE FUNCTION r.creator_id_from_comment_aggregates (agg comment_aggregates)
     RETURNS int
-    SELECT creator_id FROM comment WHERE comment.id = agg.comment_id LIMIT 1;
+    SELECT
+        creator_id
+    FROM
+        comment
+    WHERE
+        comment.id = agg.comment_id LIMIT 1;
 
 CREATE PROCEDURE r.post_or_comment (thing_type text)
 LANGUAGE plpgsql
@@ -80,7 +87,11 @@ BEGIN
                     thing_report
                 SET
                     resolved = TRUE, resolver_id = mod_person_id, updated = now()
-                FROM (SELECT DISTINCT thing_id FROM new_removal WHERE new_removal.removed) AS distinct_removal
+                FROM ( SELECT DISTINCT
+                        thing_id
+                    FROM new_removal
+                    WHERE
+                        new_removal.removed) AS distinct_removal
                 WHERE
                     report.thing_id = distinct_removal.thing_id
                     AND NOT report.resolved
@@ -91,13 +102,14 @@ BEGIN
         AFTER INSERT ON mod_remove_thing REFERENCING NEW TABLE AS new_removal
         FOR EACH STATEMENT
         EXECUTE FUNCTION r.resolve_reports_when_thing_removed ( );
-    -- When a thing gets a vote, update its aggregates and its creator's aggregates
-    CREATE FUNCTION r.thing_aggregates_from_like ( )
+        -- When a thing gets a vote, update its aggregates and its creator's aggregates
+        CREATE FUNCTION r.thing_aggregates_from_like ( )
             RETURNS TRIGGER
             LANGUAGE plpgsql
             AS $$
             BEGIN
-                WITH thing_diff AS ( UPDATE
+                WITH thing_diff AS (
+                    UPDATE
                         thing_aggregates AS a
                     SET
                         score = a.score + diff.upvotes - diff.downvotes,
@@ -106,21 +118,32 @@ BEGIN
                         controversy_rank = controversy_rank ((a.upvotes + diff.upvotes)::numeric, (a.downvotes + diff.downvotes)::numeric)
                     FROM (
                         SELECT
-                            thing_id, sum(count_diff) FILTER (WHERE score = 1) AS upvotes, sum(count_diff) FILTER (WHERE score <> 1) AS downvotes FROM r.combine_transition_tables ()
-                GROUP BY thing_id) AS diff
-                WHERE
-                    a.thing_id = diff.thing_id
-                RETURNING
-                    creator_id_from_thing_aggregates(a.*) AS creator_id, diff.upvotes - diff.downvotes AS score)
+                            thing_id,
+                            sum(count_diff) FILTER (WHERE score = 1) AS upvotes,
+                            sum(count_diff) FILTER (WHERE score <> 1) AS downvotes
+                        FROM
+                            r.combine_transition_tables ()
+                        GROUP BY
+                            thing_id) AS diff
+                    WHERE
+                        a.thing_id = diff.thing_id
+                    RETURNING
+                        creator_id_from_thing_aggregates (a.*) AS creator_id,
+                        diff.upvotes - diff.downvotes AS score)
             UPDATE
                 person_aggregates AS a
             SET
-                thing_score = a.thing_score + diff.score FROM (
-                    SELECT
-                        creator_id, sum(score) AS score
-                    FROM target_diff GROUP BY creator_id) AS diff
-                WHERE
-                    a.person_id = diff.creator_id;
+                thing_score = a.thing_score + diff.score
+            FROM (
+                SELECT
+                    creator_id,
+                    sum(score) AS score
+                FROM
+                    target_diff
+                GROUP BY
+                    creator_id) AS diff
+        WHERE
+            a.person_id = diff.creator_id;
                 RETURN NULL;
             END $$;
     CREATE TRIGGER aggregates
