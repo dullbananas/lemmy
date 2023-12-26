@@ -269,6 +269,35 @@ CREATE TRIGGER parent_aggregates
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
+-- Count subscribers for local communities
+CREATE FUNCTION r.community_aggregates_from_subscriber ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        community_aggregates AS a
+    SET
+        subscriber = a.subscribers + diff.subscribers
+    FROM (
+        SELECT
+            community_id,
+            sum(count_diff) AS subscribers
+        FROM
+            combine_transition_tables ()
+        GROUP BY
+            community_id) AS diff
+    WHERE
+        a.community_id = diff.community_id;
+    RETURN NULL;
+END
+$$;
+
+CREATE TRIGGER community_aggregates
+    AFTER INSERT OR DELETE ON community_follower REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.community_aggregates_from_subscriber ();
+
 -- These triggers create and update rows in each aggregates table to match its associated table's rows.
 -- Deleting rows and updating IDs are already handled by `CASCADE` in foreign key constraints.
 CREATE FUNCTION r.comment_aggregates_from_comment ()
