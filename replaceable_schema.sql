@@ -98,26 +98,26 @@ BEGIN
             AS $$
             BEGIN
                 WITH thing_diff AS ( UPDATE
-                        thing_aggregates
+                        thing_aggregates AS a
                     SET
-                        (score, upvotes, downvotes, controversy_rank) = (score + diff.upvotes - diff.downvotes, upvotes + diff.upvotes, downvotes + diff.downvotes, controversy_rank ((upvotes + diff.upvotes)::numeric, (downvotes + diff.downvotes)::numeric))
+                        (score, upvotes, downvotes, controversy_rank) = (SELECT a.score + diff.upvotes - diff.downvotes, a.upvotes + diff.upvotes, a.downvotes + diff.downvotes, controversy_rank ((a.upvotes + diff.upvotes)::numeric, (a.downvotes + diff.downvotes)::numeric))
                     FROM (
                         SELECT
                             thing_id, sum(count_diff) FILTER (WHERE score = 1) AS upvotes, sum(count_diff) FILTER (WHERE score <> 1) AS downvotes FROM r.combine_transition_tables ()
                 GROUP BY thing_id) AS diff
                 WHERE
-                    thing_aggregates.thing_id = diff.thing_id
+                    a.thing_id = diff.thing_id
                 RETURNING
-                    creator_id_from_thing_aggregates(thing_aggregates.*) AS creator_id, diff.upvotes - diff.downvotes AS score)
+                    creator_id_from_thing_aggregates(a.*) AS creator_id, diff.upvotes - diff.downvotes AS score)
             UPDATE
-                person_aggregates
+                person_aggregates AS a
             SET
-                thing_score = thing_score + diff.sum FROM (
+                thing_score = a.thing_score + diff.score FROM (
                     SELECT
-                        creator_id, sum(score)
+                        creator_id, sum(score) AS score
                     FROM target_diff GROUP BY creator_id) AS diff
                 WHERE
-                    person_aggregates.person_id = diff.creator_id;
+                    a.person_id = diff.creator_id;
                 RETURN NULL;
             END $$;
     CREATE TRIGGER aggregates
