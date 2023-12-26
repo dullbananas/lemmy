@@ -162,55 +162,7 @@ CALL r.post_or_comment ('post');
 
 CALL r.post_or_comment ('comment');
 
--- Create triggers that update site_aggregates counts
-/*CREATE FUNCTION r.count_local (OUT count_diff bigint)
-    LANGUAGE sql
-    AS $$
-    SELECT
-        sum(count_diff)
-    FROM
-        r.combine_transition_tables ()
-    WHERE
-        local;
-$$;
-
-CREATE FUNCTION r.count_local_filtered (OUT count_diff bigint)
-    LANGUAGE sql
-    AS $$
-    SELECT
-        sum(count_diff)
-    FROM
-        r.combine_transition_tables ()
-    WHERE
-        local AND NOT (deleted OR removed);
-$$;
-
-
-CREATE PROCEDURE r.site_aggregates_counter_filtered (table_name text, counter_name text)
-    LANGUAGE plpgsql
-    AS $a$
-BEGIN
-    EXECUTE format('CREATE FUNCTION site_aggregates_from_%1$s () RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN '
-        'UPDATE site_aggregates SET %2$s = %2$s + count_diff FROM count_local_filtered (); RETURN NULL; '
-        'END $$; '
-        'CREATE TRIGGER site_aggregates ', table_name, counter_name, source_function);
-$a$;
-
-CREATE FUNCTION r.site_aggregates_from_post ()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    UPDATE
-        site_aggregates
-    SET
-        posts = posts + count_diff
-    FROM
-        count_local_filtered ();
-    RETURN NULL;
-END
-$$;*/
-
+-- Create triggers that update counts in parent aggregates
 CREATE FUNCTION r.parent_aggregates_from_comment ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
@@ -231,6 +183,26 @@ BEGIN
             GROUPING SETS (post_id,
                 creator_id,
                 local)
+),
+unused_person_aggregates_update_result AS (
+    UPDATE
+        person_aggregates AS a
+    SET
+        comment_count = a.comment_count + comment_group.comments
+    FROM
+        comment_group
+    WHERE
+        a.person_id = comment_group.creator_id
+),
+unused_site_aggregates_update_result AS (
+    UPDATE
+        site_aggregates AS a
+    SET
+        comments = a.comments + comment_group.comments
+    FROM
+        comment_group
+    WHERE
+        comment_group.local
 ),
 post_diff AS (
     UPDATE
@@ -263,8 +235,20 @@ post_diff AS (
         a.community_id,
         diff.comments
 )
-SELECT
-    1;
+UPDATE
+    community_aggregates AS a
+SET
+    comments = a.comments + diff.comments
+FROM (
+    SELECT
+        community_id,
+        sum(comments)
+    FROM
+        post_diff
+    GROUP BY
+        community_id) AS diff
+WHERE
+    a.community_id = diff.community_id;
     RETURN NULL;
 END
 $$;
