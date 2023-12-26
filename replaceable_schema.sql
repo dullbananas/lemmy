@@ -18,7 +18,7 @@ DROP SCHEMA IF EXISTS r CASCADE;
 CREATE SCHEMA r;
 
 -- Rank calculations
-CREATE OR REPLACE FUNCTION r.controversy_rank (upvotes numeric, downvotes numeric)
+CREATE FUNCTION r.controversy_rank (upvotes numeric, downvotes numeric)
     RETURNS float
     LANGUAGE plpgsql
     IMMUTABLE
@@ -57,11 +57,11 @@ CREATE FUNCTION r.combine_transition_tables ()
 $$;
 
 -- Define triggers for both posts and comments
-CREATE FUNCTION r.get_post_creator_id (agg post_aggregates)
+CREATE FUNCTION r.creator_id_from_post_aggregates (agg post_aggregates)
     RETURNS int
     SELECT creator_id FROM agg;
 
-CREATE FUNCTION r.get_comment_creator_id (agg comment_aggregates)
+CREATE FUNCTION r.creator_id_from_comment_aggregates (agg comment_aggregates)
     RETURNS int
     SELECT creator_id FROM comment WHERE comment.id = agg.comment_id LIMIT 1;
 
@@ -69,7 +69,9 @@ CREATE PROCEDURE r.post_or_comment (thing_type text)
 LANGUAGE plpgsql
 AS $a$
 BEGIN
-    EXECUTE replace($b$ CREATE FUNCTION r.resolve_reports_when_thing_removed ( )
+    EXECUTE replace($b$
+        -- When a thing is removed, resolve its reports
+        CREATE FUNCTION r.resolve_reports_when_thing_removed ( )
             RETURNS TRIGGER
             LANGUAGE plpgsql
             AS $$
@@ -89,6 +91,39 @@ BEGIN
         AFTER INSERT ON mod_remove_thing REFERENCING NEW TABLE AS new_removal
         FOR EACH STATEMENT
         EXECUTE FUNCTION r.resolve_reports_when_thing_removed ( );
+    -- When a thing gets a vote, update its aggregates and its creator's aggregates
+    CREATE FUNCTION r.thing_aggregates_from_like ( )
+            RETURNS TRIGGER
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                WITH thing_diff AS ( UPDATE
+                        thing_aggregates
+                    SET
+                        (score, upvotes, downvotes, controversy_rank) = (score + diff.upvotes - diff.downvotes, upvotes + diff.upvotes, downvotes + diff.downvotes, controversy_rank ((upvotes + diff.upvotes)::numeric, (downvotes + diff.downvotes)::numeric))
+                    FROM (
+                        SELECT
+                            thing_id, sum(count_diff) FILTER (WHERE score = 1) AS upvotes, sum(count_diff) FILTER (WHERE score <> 1) AS downvotes FROM r.combine_transition_tables ()
+                GROUP BY thing_id) AS diff
+                WHERE
+                    thing_aggregates.thing_id = diff.thing_id
+                RETURNING
+                    creator_id_from_thing_aggregates(thing_aggregates.*) AS creator_id, diff.upvotes - diff.downvotes AS score)
+            UPDATE
+                person_aggregates
+            SET
+                thing_score = thing_score + diff.sum FROM (
+                    SELECT
+                        creator_id, sum(score)
+                    FROM target_diff GROUP BY creator_id) AS diff
+                WHERE
+                    person_aggregates.person_id = diff.creator_id;
+                RETURN NULL;
+            END $$;
+    CREATE TRIGGER aggregates
+        AFTER INSERT OR DELETE OR UPDATE OF score ON thing_like REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION r.thing_aggregates_from_like;
         $b$,
         'thing',
         thing_type);
@@ -215,54 +250,6 @@ CREATE TRIGGER aggregates
     AFTER INSERT ON site
     FOR EACH ROW
     EXECUTE FUNCTION r.site_aggregates_from_site ();
-
--- These triggers update aggregates in response to votes.
-CREATE PROCEDURE r.aggregates_from_like (target_name text, creator_id_getter text)
-LANGUAGE plpgsql
-AS $a$
-BEGIN
-    EXECUTE format($b$ CREATE FUNCTION r.%1$s_aggregates_from_like ( )
-            RETURNS TRIGGER
-            LANGUAGE plpgsql
-            AS $$
-            BEGIN
-                -- Update aggregates for target, then update aggregates for target's creator
-                WITH target_diff AS ( UPDATE
-                        %1$s_aggregates
-                    SET
-                        (score, upvotes, downvotes, controversy_rank) = (score + diff.upvotes - diff.downvotes, upvotes + diff.upvotes, downvotes + diff.downvotes, controversy_rank ((upvotes + diff.upvotes)::numeric, (downvotes + diff.downvotes)::numeric))
-                    FROM (
-                        SELECT
-                            %1$s_id, sum(count_diff) FILTER (WHERE score = 1) AS upvotes, sum(count_diff) FILTER (WHERE score <> 1) AS downvotes FROM r.combine_transition_tables ()
-                GROUP BY %1$s_id) AS diff
-                WHERE
-                    %1$s_aggregates.%1 $ s_id = diff.%1$s_id
-                RETURNING
-                    %2$s AS creator_id, diff.upvotes - diff.downvotes AS score)
-            UPDATE
-                person_aggregates
-            SET
-                %1$s_score = %1$s_score + diff.sum FROM (
-                    SELECT
-                        creator_id, sum(score)
-                    FROM target_diff GROUP BY creator_id) AS diff
-                WHERE
-                    person_aggregates.person_id = diff.creator_id;
-                RETURN NULL;
-            END $$;
-    CREATE TRIGGER aggregates
-        AFTER INSERT OR DELETE OR UPDATE OF score ON %1$s_like REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
-        FOR EACH STATEMENT
-        EXECUTE FUNCTION r.%1$s_aggregates_from_like;
-        $b$,
-        target_name,
-        creator_id_getter);
-END
-$a$;
-
-CALL r.aggregates_from_like ('comment', '(SELECT creator_id FROM comment WHERE comment.id = target_aggregates.comment_id LIMIT 1)');
-
-CALL r.aggregates_from_like ('post', 'target_aggregates.creator_id');
 
 COMMIT;
 
