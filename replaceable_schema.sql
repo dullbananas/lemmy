@@ -228,12 +228,21 @@ post_diff AS (
                     AND a.published > (new_comment.published - '2 days'::interval)
                 LIMIT 1))
     FROM
-        comment_group
+        comment_group,
+        LATERAL (
+            SELECT
+                *
+            FROM
+                post
+            WHERE
+                a.post_id = post.id
+            LIMIT 1) AS post
     WHERE
         a.post_id = comment_group.post_id
     RETURNING
         a.community_id,
-        diff.comments
+        diff.comments,
+        NOT (post.deleted OR post.removed) AS include_in_community_aggregates
 )
 UPDATE
     community_aggregates AS a
@@ -245,6 +254,8 @@ FROM (
         sum(comments)
     FROM
         post_diff
+    WHERE
+        post_diff.include_in_community_aggregates
     GROUP BY
         community_id) AS diff
 WHERE
@@ -336,8 +347,15 @@ BEGIN
         new_post.featured_community,
         new_post.featured_local
     FROM
-        new_post
-        INNER JOIN community ON community.id = new_post.community_id
+        new_post,
+        LATERAL (
+            SELECT
+                *
+            FROM
+                community
+            WHERE
+                community.id = new_post.community_id
+            LIMIT 1) AS community,
     ON CONFLICT
         DO UPDATE SET
             featured_community = excluded.featured_community,
