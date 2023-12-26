@@ -185,7 +185,18 @@ CREATE FUNCTION r.count_local_filtered (OUT count_diff bigint)
         local AND NOT (deleted OR removed);
 $$;
 
-CREATE FUNCTION site_aggregates_from_post ()
+
+CREATE PROCEDURE r.site_aggregates_counter_filtered (table_name text, counter_name text)
+    LANGUAGE plpgsql
+    AS $a$
+BEGIN
+    EXECUTE format('CREATE FUNCTION site_aggregates_from_%1$s () RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN '
+        'UPDATE site_aggregates SET %2$s = %2$s + count_diff FROM count_local_filtered (); RETURN NULL; '
+        'END $$; '
+        'CREATE TRIGGER site_aggregates ', table_name, counter_name, source_function);
+$a$;
+
+CREATE FUNCTION r.site_aggregates_from_post ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     AS $$
@@ -199,6 +210,11 @@ BEGIN
     RETURN NULL;
 END
 $$;
+
+CREATE TRIGGER aggregates
+        AFTER INSERT OR DELETE OR UPDATE OF score ON thing_like REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION r.thing_aggregates_from_like;
 
 -- These triggers create and update rows in each aggregates table to match its associated table's rows.
 -- Deleting rows and updating IDs are already handled by `CASCADE` in foreign key constraints.
