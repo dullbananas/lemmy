@@ -163,7 +163,7 @@ CALL r.post_or_comment ('post');
 CALL r.post_or_comment ('comment');
 
 -- Create triggers that update site_aggregates counts
-CREATE FUNCTION r.count_local (OUT count_diff bigint)
+/*CREATE FUNCTION r.count_local (OUT count_diff bigint)
     LANGUAGE sql
     AS $$
     SELECT
@@ -209,12 +209,46 @@ BEGIN
         count_local_filtered ();
     RETURN NULL;
 END
+$$;*/
+
+CREATE FUNCTION r.parent_aggregates_from_comment ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    WITH
+        comment_group AS (
+            SELECT
+                local,
+                post_id,
+                creator_id,
+                published,
+                sum(count_diff)
+            FROM
+                combine_transition_tables ()
+            GROUP BY GROUPING SETS (local, post_id, creator_id)
+            WHERE
+                NOT (deleted OR removed)),
+        post_diff AS (
+            UPDATE
+                post_aggregates AS a
+            SET
+                comments = a.comments + diff.comments,
+                newest_comment_time = GREATEST (a.newest_comment_time, diff.newest_comment_time)
+                newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, diff.newest_comment_time_necro
+            FROM (
+                SELECT
+                    post_id,
+                    max(published) AS newest_comment_time,
+                    max(published) FILTER (WHERE ) AS diff)
+    RETURN NULL;
+END
 $$;
 
-CREATE TRIGGER aggregates
-        AFTER INSERT OR DELETE OR UPDATE OF score ON thing_like REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
-        FOR EACH STATEMENT
-        EXECUTE FUNCTION r.thing_aggregates_from_like;
+CREATE TRIGGER parent_aggregates
+    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
 -- These triggers create and update rows in each aggregates table to match its associated table's rows.
 -- Deleting rows and updating IDs are already handled by `CASCADE` in foreign key constraints.
