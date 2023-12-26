@@ -40,7 +40,6 @@ $$;
 CREATE FUNCTION r.combine_transition_tables ()
     RETURNS SETOF record
     LANGUAGE sql
-    PARALLEL RESTRICTED
     AS $$
     SELECT
         -1 AS count_diff,
@@ -55,7 +54,7 @@ CREATE FUNCTION r.combine_transition_tables ()
         new_table;
 $$;
 
--- Define triggers for both posts and comments
+-- Define functions
 CREATE FUNCTION r.creator_id_from_post_aggregates (agg post_aggregates)
     RETURNS int
     SELECT
@@ -72,6 +71,9 @@ CREATE FUNCTION r.creator_id_from_comment_aggregates (agg comment_aggregates)
     WHERE
         comment.id = agg.comment_id LIMIT 1;
 
+CREATE FUNCTION r.post_not_removed
+
+-- Create triggers for both post and comments
 CREATE PROCEDURE r.post_or_comment (thing_type text)
 LANGUAGE plpgsql
 AS $a$
@@ -159,6 +161,44 @@ $a$;
 CALL r.post_or_comment ('post');
 
 CALL r.post_or_comment ('comment');
+
+-- Create triggers that update site_aggregates counts
+CREATE FUNCTION r.count_local (OUT count_diff bigint)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        sum(count_diff)
+    FROM
+        r.combine_transition_tables ()
+    WHERE
+        local;
+$$;
+
+CREATE FUNCTION r.count_local_filtered (OUT count_diff bigint)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        sum(count_diff)
+    FROM
+        r.combine_transition_tables ()
+    WHERE
+        local AND NOT (deleted OR removed);
+$$;
+
+CREATE FUNCTION site_aggregates_from_post ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        site_aggregates
+    SET
+        posts = posts + count_diff
+    FROM
+        count_local_filtered ();
+    RETURN NULL;
+END
+$$;
 
 -- These triggers create and update rows in each aggregates table to match its associated table's rows.
 -- Deleting rows and updating IDs are already handled by `CASCADE` in foreign key constraints.
