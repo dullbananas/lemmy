@@ -84,7 +84,7 @@ BEGIN
                 WHERE
                     report.thing_id = distinct_removal.thing_id
                     AND NOT report.resolved
-                    AND COALESCE(report.updated < now(), TRUE)
+                    AND COALESCE(report.updated < now(), TRUE);
                 RETURN NULL;
             END $$;
     CREATE TRIGGER resolve_reports
@@ -100,7 +100,10 @@ BEGIN
                 WITH thing_diff AS ( UPDATE
                         thing_aggregates AS a
                     SET
-                        (score, upvotes, downvotes, controversy_rank) = (SELECT a.score + diff.upvotes - diff.downvotes, a.upvotes + diff.upvotes, a.downvotes + diff.downvotes, controversy_rank ((a.upvotes + diff.upvotes)::numeric, (a.downvotes + diff.downvotes)::numeric))
+                        score = a.score + diff.upvotes - diff.downvotes,
+                        upvotes = a.upvotes + diff.upvotes,
+                        downvotes = a.downvotes + diff.downvotes,
+                        controversy_rank = controversy_rank ((a.upvotes + diff.upvotes)::numeric, (a.downvotes + diff.downvotes)::numeric)
                     FROM (
                         SELECT
                             thing_id, sum(count_diff) FILTER (WHERE score = 1) AS upvotes, sum(count_diff) FILTER (WHERE score <> 1) AS downvotes FROM r.combine_transition_tables ()
