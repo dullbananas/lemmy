@@ -56,39 +56,48 @@ CREATE FUNCTION r.combine_transition_tables ()
         new_table;
 $$;
 
--- These triggers resolve an item's reports when the item is marked as removed.
-CREATE PROCEDURE r.resolve_reports_when_target_removed (target_name text)
+-- Define triggers for both posts and comments
+CREATE FUNCTION r.get_post_creator_id (agg post_aggregates)
+    RETURNS int
+    SELECT creator_id FROM agg;
+
+CREATE FUNCTION r.get_comment_creator_id (agg comment_aggregates)
+    RETURNS int
+    SELECT creator_id FROM comment WHERE comment.id = agg.comment_id LIMIT 1;
+
+CREATE PROCEDURE r.post_or_comment (thing_type text)
 LANGUAGE plpgsql
 AS $a$
 BEGIN
-    EXECUTE format($b$ CREATE FUNCTION r.resolve_reports_when_%1$s_removed ( )
+    EXECUTE replace($b$ CREATE FUNCTION r.resolve_reports_when_thing_removed ( )
             RETURNS TRIGGER
             LANGUAGE plpgsql
             AS $$
             BEGIN
                 UPDATE
-                    %1$s_report AS report
+                    thing_report
                 SET
                     resolved = TRUE, resolver_id = mod_person_id, updated = now()
-                FROM (SELECT DISTINCT %1$s_id FROM new_removal WHERE new_removal.removed) AS distinct_removal
+                FROM (SELECT DISTINCT thing_id FROM new_removal WHERE new_removal.removed) AS distinct_removal
                 WHERE
-                    report.%1$s_id = distinct_removal.%1$s_id
+                    report.thing_id = distinct_removal.thing_id
                     AND NOT report.resolved
                     AND COALESCE(report.updated < now(), TRUE)
                 RETURN NULL;
             END $$;
     CREATE TRIGGER resolve_reports
-        AFTER INSERT ON mod_remove_%1$s REFERENCING NEW TABLE AS new_removal
+        AFTER INSERT ON mod_remove_thing REFERENCING NEW TABLE AS new_removal
         FOR EACH STATEMENT
-        EXECUTE FUNCTION r.resolve_reports_when_%1$s_removed ( );
+        EXECUTE FUNCTION r.resolve_reports_when_thing_removed ( );
         $b$,
-        target_name);
+        'thing',
+        thing_type);
 END
 $a$;
 
-CALL r.resolve_reports_when_target_removed ('comment');
+CALL r.post_or_comment ('post');
 
-CALL r.resolve_reports_when_target_removed ('post');
+CALL r.post_or_comment ('comment');
 
 -- These triggers create and update rows in each aggregates table to match its associated table's rows.
 -- Deleting rows and updating IDs are already handled by `CASCADE` in foreign key constraints.
