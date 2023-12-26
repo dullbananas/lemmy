@@ -122,7 +122,7 @@ BEGIN
                         SELECT
                             thing_id,
                             sum(count_diff) FILTER (WHERE score = 1) AS upvotes,
-                            sum(count_diff) FILTER (WHERE score <> 1) AS downvotes
+                            sum(count_diff) FILTER (WHERE score != 1) AS downvotes
                         FROM
                             r.combine_transition_tables ()
                         GROUP BY
@@ -219,28 +219,31 @@ BEGIN
     WITH
         comment_group AS (
             SELECT
-                local,
                 post_id,
                 creator_id,
-                published,
-                sum(count_diff)
+                local,
+                sum(count_diff) AS comments,
             FROM
                 combine_transition_tables ()
-            GROUP BY GROUPING SETS (local, post_id, creator_id)
             WHERE
-                NOT (deleted OR removed)),
+                NOT (deleted OR removed)
+            GROUP BY
+                GROUPING SETS (post_id, creator_id, local)),
         post_diff AS (
             UPDATE
                 post_aggregates AS a
             SET
-                comments = a.comments + diff.comments,
-                newest_comment_time = GREATEST (a.newest_comment_time, diff.newest_comment_time)
-                newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, diff.newest_comment_time_necro
-            FROM (
-                SELECT
-                    post_id,
-                    max(published) AS newest_comment_time,
-                    max(published) FILTER (WHERE ) AS diff)
+                comments = a.comments + comment_group.comments,
+                newest_comment_time = GREATEST (a.newest_comment_time, (SELECT max(published) FROM new_table WHERE a.post_id = new_table.post_id))
+                newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, (SELECT max(published) FROM new_table WHERE a.post_id = new_table.post_id AND .creator_id != p.creator_id
+            AND pa.published > ('now'::timestamp - '2 days'::interval)))
+            FROM
+                comment_group
+            WHERE
+                a.post_id = comment_group.post_id
+            RETURNING
+                a.community_id,
+                diff.comments)
     RETURN NULL;
 END
 $$;
