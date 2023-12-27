@@ -293,6 +293,30 @@ CREATE TRIGGER site_aggregates
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.site_aggregates_from_community ();
 
+CREATE FUNCTION site_aggregates_from_person ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        site_aggregates AS a
+    SET
+        users = a.users + diff.users
+    FROM (
+        SELECT
+            sum(change_diff) AS users
+        FROM
+            combine_transition_tables ()
+        WHERE
+            local;
+    RETURN NULL;
+$$;
+
+CREATE TRIGGER site_aggregates
+    AFTER INSERT OR DELETE ON person REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.site_aggregates_from_person ();
+
 -- Count subscribers for local communities
 CREATE FUNCTION r.community_aggregates_from_subscriber ()
     RETURNS TRIGGER
