@@ -269,6 +269,30 @@ CREATE TRIGGER parent_aggregates
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
+CREATE FUNCTION site_aggregates_from_community ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        site_aggregates AS a
+    SET
+        communities = a.communities + diff.communities
+    FROM (
+        SELECT
+            sum(change_diff) AS communities
+        FROM
+            combine_transition_tables ()
+        WHERE
+            local AND NOT (deleted OR removed)) AS diff;
+    RETURN NULL;
+$$;
+
+CREATE TRIGGER site_aggregates
+    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON community REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.site_aggregates_from_community ();
+
 -- Count subscribers for local communities
 CREATE FUNCTION r.community_aggregates_from_subscriber ()
     RETURNS TRIGGER
