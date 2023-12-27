@@ -72,7 +72,6 @@ CREATE FUNCTION r.creator_id_from_comment_aggregates (agg comment_aggregates)
         comment.id = agg.comment_id LIMIT 1;
 
 CREATE FUNCTION r.post_not_removed
-
 -- Create triggers for both post and comments
 CREATE PROCEDURE r.post_or_comment (thing_type text)
 LANGUAGE plpgsql
@@ -215,7 +214,7 @@ post_diff AS (
                 FROM new_table AS new_comment
                 WHERE
                     a.post_id = new_comment.post_id)
-                LIMIT 1),
+            LIMIT 1),
         newest_comment_time_necro = GREATEST (a.newest_comment_time_necro, (
                 SELECT
                     max(published)
@@ -242,8 +241,8 @@ post_diff AS (
     RETURNING
         a.community_id,
         diff.comments,
-        NOT (post.deleted OR post.removed) AS include_in_community_aggregates
-)
+        NOT (post.deleted
+            OR post.removed) AS include_in_community_aggregates)
 UPDATE
     community_aggregates AS a
 SET
@@ -260,12 +259,13 @@ FROM (
         community_id) AS diff
 WHERE
     a.community_id = diff.community_id;
-    RETURN NULL;
+        RETURN NULL;
 END
 $$;
 
 CREATE TRIGGER parent_aggregates
-    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    AFTER INSERT OR DELETE OR UPDATE OF deleted,
+    removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
@@ -308,8 +308,7 @@ unused_site_aggregates_update_result AS (
     FROM
         post_group
     WHERE
-        post_group.local
-)
+        post_group.local)
 UPDATE
     community_aggregates AS a
 SET
@@ -323,7 +322,8 @@ END
 $$;
 
 CREATE TRIGGER parent_aggregates
-    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    AFTER INSERT OR DELETE OR UPDATE OF deleted,
+    removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
@@ -342,12 +342,15 @@ BEGIN
         FROM
             combine_transition_tables ()
         WHERE
-            local AND NOT (deleted OR removed)) AS diff;
+            local
+            AND NOT (deleted
+                OR removed)) AS diff;
     RETURN NULL;
 $$;
 
 CREATE TRIGGER site_aggregates
-    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON community REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    AFTER INSERT OR DELETE OR UPDATE OF deleted,
+    removed ON community REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.site_aggregates_from_community ();
 
@@ -366,7 +369,7 @@ BEGIN
         FROM
             combine_transition_tables ()
         WHERE
-            local;
+            local) AS diff;
     RETURN NULL;
 $$;
 
@@ -388,15 +391,31 @@ BEGIN
     FROM (
         SELECT
             old_post.community_id,
-            sum((CASE WHEN new_post.deleted AND new_post.removed THEN -1 ELSE 1) * post_aggregates.comments) AS comments
+            sum((
+                CASE WHEN new_post.deleted
+                    AND new_post.removed THEN
+                    -1
+                ELSE
+                    1
+                END) * post_aggregates.comments) AS comments
         FROM
             new_post
-            INNER JOIN old_post ON new_post.id = old_post.id AND (new_post.deleted AND new_post.removed) != (old_post.deleted AND old_post.removed),
-            LATERAL (SELECT * FROM post_aggregates WHERE post_id = new_post.id LIMIT 1) AS post_aggregates
+            INNER JOIN old_post ON new_post.id = old_post.id
+                AND (new_post.deleted
+                    AND new_post.removed) != (old_post.deleted
+                    AND old_post.removed),
+                LATERAL (
+                    SELECT
+                        *
+                    FROM
+                        post_aggregates
+                WHERE
+                    post_id = new_post.id
+                LIMIT 1) AS post_aggregates
         GROUP BY
             old_post.community_id) AS diff
-    WHERE
-        a.community_id = diff.community_id;
+WHERE
+    a.community_id = diff.community_id;
     RETURN NULL;
 $$;
 
@@ -418,8 +437,8 @@ BEGIN
             combine_transition_tables ()
         GROUP BY
             community_id) AS diff
-    WHERE
-        a.community_id = diff.community_id;
+WHERE
+    a.community_id = diff.community_id;
     RETURN NULL;
 END
 $$;
