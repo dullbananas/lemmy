@@ -419,6 +419,11 @@ WHERE
     RETURN NULL;
 $$;
 
+CREATE TRIGGER comment_count
+    AFTER UPDATE OF deleted, removed ON post REFERENCING OLD TABLE AS old_post NEW TABLE AS new_post
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.update_comment_count_from_post ();
+
 -- Count subscribers for local communities
 CREATE FUNCTION r.community_aggregates_from_subscriber ()
     RETURNS TRIGGER
