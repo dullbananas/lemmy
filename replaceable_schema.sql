@@ -269,6 +269,64 @@ CREATE TRIGGER parent_aggregates
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.parent_aggregates_from_comment ();
 
+CREATE FUNCTION r.parent_aggregates_from_post ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    WITH post_group AS (
+        SELECT
+            community_id,
+            creator_id,
+            local,
+            sum(count_diff) AS posts,
+        FROM
+            combine_transition_tables ()
+        WHERE
+            NOT (deleted
+                OR removed)
+        GROUP BY
+            GROUPING SETS (community_id,
+                creator_id,
+                local)
+),
+unused_person_aggregates_update_result AS (
+    UPDATE
+        person_aggregates AS a
+    SET
+        post_count = a.post_count + post_group.posts
+    FROM
+        post_group
+    WHERE
+        a.person_id = post_group.creator_id
+),
+unused_site_aggregates_update_result AS (
+    UPDATE
+        site_aggregates AS a
+    SET
+        posts = a.posts + post_group.posts
+    FROM
+        post_group
+    WHERE
+        post_group.local
+)
+UPDATE
+    community_aggregates AS a
+SET
+    posts = a.posts + post_group.posts
+FROM
+    post_group
+WHERE
+    a.community_id = post_group.community_id;
+    RETURN NULL;
+END
+$$;
+
+CREATE TRIGGER parent_aggregates
+    AFTER INSERT OR DELETE OR UPDATE OF deleted, removed ON comment REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION r.parent_aggregates_from_comment ();
+
 CREATE FUNCTION site_aggregates_from_community ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
