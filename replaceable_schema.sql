@@ -317,6 +317,31 @@ CREATE TRIGGER site_aggregates
     FOR EACH STATEMENT
     EXECUTE FUNCTION r.site_aggregates_from_person ();
 
+-- For community_aggregates.comments, don't include comments of deleted or removed posts
+CREATE FUNCTION r.update_comment_count_from_post ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        community_aggregates AS a
+    SET
+        comments = a.comments + diff.comments
+    FROM (
+        SELECT
+            old_post.community_id,
+            sum((CASE WHEN new_post.deleted AND new_post.removed THEN -1 ELSE 1) * post_aggregates.comments) AS comments
+        FROM
+            new_post
+            INNER JOIN old_post ON new_post.id = old_post.id AND (new_post.deleted AND new_post.removed) != (old_post.deleted AND old_post.removed),
+            LATERAL (SELECT * FROM post_aggregates WHERE post_id = new_post.id LIMIT 1) AS post_aggregates
+        GROUP BY
+            old_post.community_id) AS diff
+    WHERE
+        a.community_id = diff.community_id;
+    RETURN NULL;
+$$;
+
 -- Count subscribers for local communities
 CREATE FUNCTION r.community_aggregates_from_subscriber ()
     RETURNS TRIGGER
