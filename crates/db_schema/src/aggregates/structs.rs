@@ -9,6 +9,7 @@ use crate::schema::{
   site_aggregates,
 };
 use chrono::{DateTime, Utc};
+#[cfg(feature = "full")]
 use diesel::{dsl, expression_methods::NullableExpressionMethods};
 #[cfg(feature = "full")]
 use i_love_jesus::CursorKeysModule;
