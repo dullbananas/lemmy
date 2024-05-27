@@ -1,10 +1,10 @@
-DROP VIEW IF EXISTS post_view;
+DROP VIEW post_view;
 
-DROP VIEW IF EXISTS post_mview;
+DROP VIEW post_mview;
 
-DROP MATERIALIZED VIEW IF EXISTS post_aggregates_mview;
+DROP MATERIALIZED VIEW post_aggregates_mview;
 
-DROP VIEW IF EXISTS post_aggregates_view;
+DROP VIEW post_aggregates_view;
 
 -- regen post view
 CREATE VIEW post_aggregates_view AS
