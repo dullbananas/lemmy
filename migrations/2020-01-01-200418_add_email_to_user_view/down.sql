@@ -1,5 +1,5 @@
 -- user
-DROP VIEW IF EXISTS user_view;
+DROP VIEW user_view;
 
 CREATE VIEW user_view AS
 SELECT
