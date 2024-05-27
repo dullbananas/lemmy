@@ -1,5 +1,5 @@
 -- Drop the columns
-DROP VIEW IF EXISTS user_view;
+DROP VIEW user_view;
 
 ALTER TABLE user_
     DROP COLUMN show_avatars;
