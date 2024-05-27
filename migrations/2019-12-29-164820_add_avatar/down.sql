@@ -1,11 +1,11 @@
 -- the views
-DROP VIEW IF EXISTS user_mention_view;
+DROP VIEW user_mention_view;
 
-DROP VIEW IF EXISTS reply_view;
+DROP VIEW reply_view;
 
-DROP VIEW IF EXISTS comment_view;
+DROP VIEW comment_view;
 
-DROP VIEW IF EXISTS user_view;
+DROP VIEW user_view;
 
 -- user
 CREATE VIEW user_view AS
@@ -53,7 +53,7 @@ FROM
 
 -- post
 -- Recreate the view
-DROP VIEW IF EXISTS post_view;
+DROP VIEW post_view;
 
 CREATE VIEW post_view AS
 with all_post AS (
@@ -181,7 +181,7 @@ FROM
         all_post ap;
 
 -- community
-DROP VIEW IF EXISTS community_view;
+DROP VIEW community_view;
 
 CREATE VIEW community_view AS
 with all_community AS (
@@ -402,13 +402,13 @@ WHERE
     um.comment_id = c.id;
 
 -- community tables
-DROP VIEW IF EXISTS community_moderator_view;
+DROP VIEW community_moderator_view;
 
-DROP VIEW IF EXISTS community_follower_view;
+DROP VIEW community_follower_view;
 
-DROP VIEW IF EXISTS community_user_ban_view;
+DROP VIEW community_user_ban_view;
 
-DROP VIEW IF EXISTS site_view;
+DROP VIEW site_view;
 
 CREATE VIEW community_moderator_view AS
 SELECT
