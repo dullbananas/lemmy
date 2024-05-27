@@ -1,16 +1,16 @@
-DROP VIEW IF EXISTS reply_view;
+DROP VIEW reply_view;
 
-DROP VIEW IF EXISTS user_mention_view;
+DROP VIEW user_mention_view;
 
-DROP VIEW IF EXISTS user_mention_mview;
+DROP VIEW user_mention_mview;
 
-DROP VIEW IF EXISTS comment_view;
+DROP VIEW comment_view;
 
-DROP VIEW IF EXISTS comment_mview;
+DROP VIEW comment_mview;
 
-DROP MATERIALIZED VIEW IF EXISTS comment_aggregates_mview;
+DROP MATERIALIZED VIEW comment_aggregates_mview;
 
-DROP VIEW IF EXISTS comment_aggregates_view;
+DROP VIEW comment_aggregates_view;
 
 -- reply and comment view
 CREATE VIEW comment_aggregates_view AS
