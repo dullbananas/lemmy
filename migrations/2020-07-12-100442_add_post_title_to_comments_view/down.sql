@@ -1,16 +1,16 @@
-DROP VIEW user_mention_view;
+DROP VIEW IF EXISTS user_mention_view;
 
-DROP VIEW reply_fast_view;
+DROP VIEW IF EXISTS reply_fast_view;
 
-DROP VIEW comment_fast_view;
+DROP VIEW IF EXISTS comment_fast_view;
 
-DROP VIEW comment_view;
+DROP VIEW IF EXISTS comment_view;
 
-DROP VIEW user_mention_fast_view;
+DROP VIEW IF EXISTS user_mention_fast_view;
 
-DROP TABLE comment_aggregates_fast;
+DROP TABLE IF EXISTS comment_aggregates_fast;
 
-DROP VIEW comment_aggregates_view;
+DROP VIEW IF EXISTS comment_aggregates_view;
 
 CREATE VIEW comment_aggregates_view AS
 SELECT
