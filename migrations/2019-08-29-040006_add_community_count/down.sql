@@ -1,4 +1,4 @@
-DROP VIEW site_view;
+DROP VIEW IF EXISTS site_view;
 
 CREATE VIEW site_view AS
 SELECT
