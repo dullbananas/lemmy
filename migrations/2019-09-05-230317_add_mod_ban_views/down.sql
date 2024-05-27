@@ -1,5 +1,5 @@
 -- Post view
-DROP VIEW IF EXISTS post_view;
+DROP VIEW post_view;
 
 CREATE VIEW post_view AS
 with all_post AS (
