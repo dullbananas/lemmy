@@ -1,4 +1,4 @@
-DROP VIEW community_view;
+DROP VIEW IF EXISTS community_view;
 
 CREATE VIEW community_view AS
 with all_community AS (
