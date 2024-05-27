@@ -1,2 +1,2 @@
-DROP VIEW IF EXISTS user_view;
+DROP VIEW user_view;
 
