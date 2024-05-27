@@ -1,2 +1,2 @@
-DROP VIEW IF EXISTS user_mention_mview;
+DROP VIEW user_mention_mview;
 
