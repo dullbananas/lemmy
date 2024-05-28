@@ -50,6 +50,14 @@ fn queries<'a>() -> Queries<
   impl ReadFn<'a, CommentView, (CommentId, Option<PersonId>)>,
   impl ListFn<'a, CommentView, CommentQuery<'a>>,
 > {
+  let creator_is_admin = exists(
+    local_user::table.filter(
+      comment::creator_id
+        .eq(local_user::person_id)
+        .and(local_user::admin.eq(true)),
+    ),
+  );
+
   let all_joins = move |query: comment::BoxedQuery<'a, Pg>, my_person_id: Option<PersonId>| {
     query
       .inner_join(person::table.left_join(local_user::table))
@@ -96,7 +104,7 @@ fn queries<'a>() -> Queries<
           .field(community_actions::became_moderator)
           .nullable()
           .is_not_null(),
-        coalesce(local_user::admin.nullable(), false),
+        creator_is_admin,
         CommunityFollower::select_subscribed_type(),
         comment_actions::saved.nullable().is_not_null(),
         person_actions::blocked.nullable().is_not_null(),
