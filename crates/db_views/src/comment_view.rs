@@ -60,7 +60,7 @@ fn queries<'a>() -> Queries<
 
   let all_joins = move |query: comment::BoxedQuery<'a, Pg>, my_person_id: Option<PersonId>| {
     query
-      .inner_join(person::table.left_join(local_user::table))
+      .inner_join(person::table)
       .inner_join(post::table)
       .inner_join(community::table.on(post::community_id.eq(community::id)))
       .inner_join(comment_aggregates::table)
