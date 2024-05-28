@@ -111,7 +111,10 @@ fn queries<'a>() -> Queries<
         post_actions::hidden.nullable().is_not_null(),
         person_actions::blocked.nullable().is_not_null(),
         post_actions::like_score.nullable(),
-        post_aggregates::comments - coalesce(post_actions::read_comments_amount.nullable(), 0),
+        coalesce(
+          post_aggregates::comments.nullable() - post_actions::read_comments_amount.nullable(),
+          post_aggregates::comments,
+        ),
       ))
   };
 
