@@ -7,7 +7,7 @@ use crate::{
     find_action,
     get_conn,
     now,
-    uplete::{OrDelete, UpleteCount},
+    uplete::{uplete, UpleteCount},
     DbPool,
   },
 };
@@ -65,12 +65,11 @@ impl Blockable for CommunityBlock {
     community_block_form: &Self::Form,
   ) -> Result<UpleteCount, Error> {
     let conn = &mut get_conn(pool).await?;
-    diesel::update(community_actions::table.find((
+    uplete(community_actions::table.find((
       community_block_form.person_id,
       community_block_form.community_id,
     )))
-    .set(community_actions::blocked.eq(None::<DateTime<Utc>>))
-    .or_delete()
+    .set_null(community_actions::blocked)
     .get_result(conn)
     .await
   }
