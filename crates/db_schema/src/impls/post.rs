@@ -32,7 +32,7 @@ use crate::{
 use ::url::Url;
 use chrono::{DateTime, Utc};
 use diesel::{
-  dsl::{self, insert_into},
+  dsl::insert_into,
   expression::SelectableHelper,
   result::Error,
   DecoratableTarget,
