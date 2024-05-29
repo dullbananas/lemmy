@@ -7,7 +7,7 @@ use crate::{
     find_action,
     get_conn,
     now,
-    uplete::{OrDelete, UpleteCount},
+    uplete::{uplete, UpleteCount},
     DbPool,
   },
 };
@@ -62,12 +62,11 @@ impl Blockable for InstanceBlock {
     instance_block_form: &Self::Form,
   ) -> Result<UpleteCount, Error> {
     let conn = &mut get_conn(pool).await?;
-    diesel::update(instance_actions::table.find((
+    uplete(instance_actions::table.find((
       instance_block_form.person_id,
       instance_block_form.instance_id,
     )))
-    .set(instance_actions::blocked.eq(None::<DateTime<Utc>>))
-    .or_delete()
+    .set_null(instance_actions::blocked)
     .get_result(conn)
     .await
   }
