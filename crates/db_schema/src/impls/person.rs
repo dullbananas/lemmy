@@ -22,7 +22,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use diesel::{
-  dsl::{self, insert_into},
+  dsl::insert_into,
   expression::SelectableHelper,
   result::Error,
   CombineDsl,
