@@ -13,7 +13,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use diesel::{
-  dsl::{self, exists, insert_into},
+  dsl::{exists, insert_into},
   expression::SelectableHelper,
   result::Error,
   select,
