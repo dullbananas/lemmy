@@ -247,7 +247,7 @@ mod tests {
       person::{Person, PersonFollower, PersonFollowerForm, PersonInsertForm, PersonUpdateForm},
     },
     traits::{Crud, Followable},
-    utils::{build_db_pool_for_tests, uplete::uplete::Count},
+    utils::{build_db_pool_for_tests, uplete::Count},
   };
   use pretty_assertions::assert_eq;
   use serial_test::serial;
