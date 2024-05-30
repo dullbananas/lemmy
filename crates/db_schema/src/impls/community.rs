@@ -217,7 +217,9 @@ impl CommunityModerator {
   ) -> Result<uplete::Count, Error> {
     let conn = &mut get_conn(pool).await?;
 
-    uplete::new(community_actions::table.filter(community_actions::community_id.eq(for_community_id)))
+    uplete::new(
+      community_actions::table.filter(community_actions::community_id.eq(for_community_id)),
+    )
       .set_null(community_actions::became_moderator)
       .get_result(conn)
       .await
