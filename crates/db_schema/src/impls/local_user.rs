@@ -19,6 +19,7 @@ use diesel::{
   dsl::{insert_into, not, IntervalDsl},
   result::Error,
   ExpressionMethods,
+  JoinOnDsl,
   QueryDsl,
 };
 use diesel_async::RunQueryDsl;
@@ -190,7 +191,7 @@ impl LocalUser {
 
     let blocked_users = action_query(person_actions::blocked)
       .filter(person_actions::person_id.eq(person_id_))
-      .inner_join(person::table)
+      .inner_join(person::table.on(person_actions::target_id.eq(person::id)))
       .select(person::actor_id)
       .get_results(conn)
       .await?;
