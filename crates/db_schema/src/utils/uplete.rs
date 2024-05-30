@@ -14,8 +14,9 @@ use diesel::{
 use std::any::Any;
 use tuplex::IntoArray;
 
-/// Set columns to null and delete the row if all columns not in the primary key are null
-pub fn uplete<Q>(query: Q) -> UpleteBuilder<dsl::Select<Q::Query, <Q::Table as Table>::PrimaryKey>>
+/// Set columns (each specified with `UpleteBuilder::set_null`) to null in the rows found by
+/// `query`, and delete rows that have no remaining non-null values outside of the primary key
+pub fn new<Q>(query: Q) -> UpleteBuilder<dsl::Select<Q::Query, <Q::Table as Table>::PrimaryKey>>
 where
   Q: AsQuery + HasTable,
   Q::Table: Default,
@@ -192,21 +193,21 @@ impl<T: QueryFragment<Pg> + Send + 'static> From<T> for DynColumn {
 }
 
 #[derive(Queryable, PartialEq, Eq, Debug)]
-pub struct UpleteCount {
+pub struct Count {
   pub updated: i64,
   pub deleted: i64,
 }
 
-impl UpleteCount {
+impl Count {
   pub fn only_updated(n: i64) -> Self {
-    UpleteCount {
+    Count {
       updated: n,
       deleted: 0,
     }
   }
 
   pub fn only_deleted(n: i64) -> Self {
-    UpleteCount {
+    Count {
       updated: 0,
       deleted: n,
     }
