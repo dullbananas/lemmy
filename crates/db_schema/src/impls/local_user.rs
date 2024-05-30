@@ -19,7 +19,6 @@ use diesel::{
   dsl::{insert_into, not, IntervalDsl},
   result::Error,
   ExpressionMethods,
-  JoinOnDsl,
   QueryDsl,
 };
 use diesel_async::RunQueryDsl;
