@@ -3,7 +3,9 @@ use diesel::{
   dsl::{exists, not},
   pg::Pg,
   result::Error,
+  BoolExpressionMethods,
   ExpressionMethods,
+  JoinOnDsl,
   NullableExpressionMethods,
   QueryDsl,
 };
@@ -27,7 +29,6 @@ use lemmy_db_schema::{
   utils::{
     actions,
     actions_alias,
-    functions::coalesce,
     get_conn,
     limit_and_offset,
     DbConn,
