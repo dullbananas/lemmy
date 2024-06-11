@@ -90,12 +90,8 @@ impl PerformCrud for CreateCommunity {
       .icon(icon)
       .banner(banner)
       .nsfw(data.nsfw)
-      .actor_id(Some(community_actor_id.clone()))
       .private_key(Some(keypair.private_key))
       .public_key(keypair.public_key)
-      .followers_url(Some(generate_followers_url(&community_actor_id)?))
-      .inbox_url(Some(generate_inbox_url(&community_actor_id)?))
-      .shared_inbox_url(Some(generate_shared_inbox_url(&community_actor_id)?))
       .posting_restricted_to_mods(data.posting_restricted_to_mods)
       .instance_id(site_view.site.instance_id)
       .build();
