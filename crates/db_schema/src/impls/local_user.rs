@@ -233,24 +233,23 @@ impl LocalUserOptionHelper for Option<&LocalUser> {
   }
 
   fn local_user_id(&self) -> Option<LocalUserId> {
-    self.as_ref().map(|l| l.id)
+    self.map(|l| l.id)
   }
 
   fn show_bot_accounts(&self) -> bool {
-    self.as_ref().map(|l| l.show_bot_accounts).unwrap_or(true)
+    self.map(|l| l.show_bot_accounts).unwrap_or(true)
   }
 
   fn show_read_posts(&self) -> bool {
-    self.as_ref().map(|l| l.show_read_posts).unwrap_or(true)
+    self.map(|l| l.show_read_posts).unwrap_or(true)
   }
 
   fn is_admin(&self) -> bool {
-    self.as_ref().map(|l| l.admin).unwrap_or(false)
+    self.map(|l| l.admin).unwrap_or(false)
   }
 
   fn show_nsfw(&self, site: &Site) -> bool {
     self
-      .as_ref()
       .map(|l| l.show_nsfw)
       .unwrap_or(site.content_warning.is_some())
   }
